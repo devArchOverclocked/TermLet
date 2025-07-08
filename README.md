@@ -19,18 +19,31 @@
 Using [Packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
-use({
-  "devArchOverclocked/termlet.nvim",
-  config = function()
-    local termlet = require("termlet")
-    vim.keymap.set("n", "<leader>b", function()
-      termlet.run_script("build", "engine")
-    end, { desc = "Run build script" })
+use ({'devArchOverclocked/termlet.nvim', config = false })
+```
 
-    vim.keymap.set("n", "<leader>bt", function()
-      termlet.run_script("test", "scripts/test")
-    end, { desc = "Run test script" })
+```after/plugins/termlet
+local termlet = require("termlet")
 
-    vim.keymap.set("n", "<leader>bc", termlet.close_floating_window, { desc = "Close build window" })
-  end,
+termlet.setup({
+  scripts = {
+    { name = "Build", dir_name = "DIR", relative_path = "Path/to/build" },
+    { name = "Test Script", dir_name = "DIR2", relative_path = "run_test.sh" },
+  }
 })
+
+vim.keymap.set("n", "<leader>b", function()
+  termlet.run_build()
+end, { desc = "Run Build Script" })
+
+vim.keymap.set("n", "<leader>t", function()
+  termlet.run_test_script()
+end, { desc = "Run Test Script" })
+
+vim.keymap.set("n", "<leader>bc", function()
+  termlet.close_build_window()
+end, { desc = "Close Build Window" })
+```
+
+## TODO
+Find a better way to provide the relative path
