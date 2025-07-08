@@ -3,7 +3,7 @@ local config = {
   scripts = {},
 }
 
-local function open_floating_terminal()
+function M.open_floating_terminal()
   local height = math.floor(vim.o.lines / 6)
   local width = vim.o.columns
   local row = vim.o.lines - height - 2
@@ -26,18 +26,30 @@ local function open_floating_terminal()
   return buf
 end
 
-local function find_script(dir_name, relative_path)
+function M.find_script(dir_name, relative_path)
   local path = vim.fn.expand("%:p:h")
-  while path ~= "/" do
-    if vim.fn.fnamemodify(path, ":t") == dir_name then
-      local script_path = path .. "/" .. relative_path
-      if vim.fn.filereadable(script_path) == 1 then
-        return script_path
-      end
+  local root = nil
+
+  -- Walk up until we find a folder named 'dir_name' (e.g. 'dnv')
+  while path ~= "/" and path ~= "" do
+    local basename = vim.fn.fnamemodify(path, ":t")
+    if basename == dir_name then
+      root = path
+      break
     end
     path = vim.fn.fnamemodify(path, ":h")
   end
-  return nil
+
+  if not root then
+    return nil -- Could not find the target directory upwards
+  end
+
+  local script_path = root .. "/" .. relative_path
+  if vim.fn.filereadable(script_path) == 1 then
+    return script_path
+  else
+    return nil -- Script file does not exist inside found folder
+  end
 end
 
 -- Dynamically create one function per script
@@ -48,20 +60,25 @@ function M.setup(user_config)
     local function_name = "run_" .. script.name:gsub("%s+", "_"):lower()
 
     M[function_name] = function()
-      local full_path = find_script(script.dir_name, script.relative_path)
+      local full_path = M.find_script(script.dir_name, script.relative_path)
       if not full_path then
         vim.notify("Script '" .. script.name .. "' not found", vim.log.levels.ERROR)
         return
       end
 
       local cwd = vim.fn.fnamemodify(full_path, ":h")
-      local buf = open_floating_terminal()
-      vim.fn.termopen("cd " .. cwd .. " && ./build", {
+      local buf = M.open_floating_terminal()
+
+      -- Use termopen with cmd as a list and cwd for cleaner environment
+      vim.fn.termopen({ "./" .. vim.fn.fnamemodify(full_path, ":t") }, {
         on_exit = function(_, code)
           local msg = script.name .. " exited with code " .. code
           local level = code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR
-          vim.notify(msg, level)
-        end
+          vim.schedule(function()
+            vim.notify(msg, level)
+          end)
+        end,
+        cwd = cwd,
       }, { buffer = buf })
 
       vim.cmd("wincmd p") -- Restore focus
@@ -69,9 +86,8 @@ function M.setup(user_config)
   end
 end
 
--- Optional: window closer if stored somewhere
 function M.close_build_window()
-  vim.cmd("close") -- or use nvim_win_close if you store win ID
+  vim.cmd("close") -- or implement proper win handle close
 end
 
 return M
