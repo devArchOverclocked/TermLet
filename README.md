@@ -43,6 +43,31 @@ use {
 }
 ```
 
+Using [lazy.nvim](https://github.com/LazyVim/LazyVim):
+```lua
+{
+  "devArchOverclocked/termlet",
+  config = function()
+    require("termlet").setup({
+      root_dir = "~/my/project",
+      debug    = true,
+      scripts  = {
+        {
+          name      = "build_project",
+          filename  = "build.sh",
+          root_dir  = "~/projects/myapp",
+        },
+        {
+          name          = "start_server",
+          dir_name      = "server",
+          relative_path = "start.py",
+        },
+      },
+    })
+  end,
+},
+```
+
 ---
 
 ## ⚙️ Configuration
