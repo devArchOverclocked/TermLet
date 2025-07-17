@@ -20,8 +20,8 @@
 Using [Packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
-{
-  "your-username/termlet.nvim",
+use {
+  "devArchOverclocked/termlet",
   config = function()
     require("termlet").setup({
       root_dir = "~/my/project",
