@@ -147,7 +147,7 @@ Additional utility methods:
 
 ---
 
-## ✅ Example
+## ✅ Example using [Packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
 require("termlet").setup({
@@ -170,4 +170,61 @@ require("termlet").setup({
     }
   }
 })
+```
+
+
+## ✅ Example ```termlet.lua``` using [lazy.nvim](https://github.com/LazyVim/LazyVim):
+
+```lua
+return {
+  {
+    'devArchOverclocked/termlet',
+    event = 'VeryLazy',
+    opts = {
+      root_dir = '~/path/to/my/projects/', -- Default root directory for script search
+      terminal = {
+        height_ratio = 0.50,
+        width_ratio = 1,
+        border = 'rounded',                -- "none", "single", "double", "rounded", etc.
+        position = 'bottom',               -- "bottom", "center", "top"
+      },
+      scripts = {                          -- List of scripts with `name` and either `filename` or `dir_name`/`relative_path`
+
+        { name = 'build_project', filename = 'build.sh' },
+        { name = 'start_server', filename = 'server_test.py', cmd = 'python3 server_test.py' },
+      },
+      debug = false,                       -- Enable verbose debug logging
+    },
+    keys = {
+      {
+        '<leader>tb',
+        function()
+          require('termlet').run_build_project()
+        end,
+        desc = 'TermLet: Build project',
+      },
+      {
+        '<leader>ts',
+        function()
+          require('termlet').run_start_server()
+        end,
+        desc = 'TermLet: Start server',
+      },
+      {
+        '<leader>tl',
+        function()
+          require('termlet').list_scripts()
+        end,
+        desc = 'TermLet: List scripts',
+      },
+      {
+        '<leader>tc',
+        function()
+          require('termlet').close_terminal()
+        end,
+        desc = 'TermLet: Close terminal',
+      },
+    },
+  },
+}
 ```
