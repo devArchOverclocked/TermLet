@@ -1,5 +1,8 @@
 local M = {}
 
+-- Load menu module
+local menu = require("termlet.menu")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -9,6 +12,12 @@ local config = {
     width_ratio = 1.0,   -- full width
     border = "rounded",
     position = "bottom", -- "bottom", "center", "top"
+  },
+  menu = {
+    width_ratio = 0.6,
+    height_ratio = 0.5,
+    border = "rounded",
+    title = " TermLet Scripts ",
   },
   debug = false,
 }
@@ -417,6 +426,35 @@ end
 M.close_build_window = function()
   vim.notify("close_build_window is deprecated, use close_terminal", vim.log.levels.WARN)
   return M.close_terminal()
+end
+
+-- Open the interactive script menu
+function M.open_menu()
+  if not config.scripts or #config.scripts == 0 then
+    vim.notify("No scripts configured", vim.log.levels.INFO)
+    return false
+  end
+
+  return menu.open(config.scripts, execute_script, config.menu)
+end
+
+-- Close the menu if open
+function M.close_menu()
+  menu.close()
+end
+
+-- Check if menu is currently open
+function M.is_menu_open()
+  return menu.is_open()
+end
+
+-- Toggle the menu open/closed
+function M.toggle_menu()
+  if menu.is_open() then
+    menu.close()
+  else
+    M.open_menu()
+  end
 end
 
 return M

@@ -9,6 +9,7 @@
 * 📦 **Run user-defined scripts** from structured configuration
 * 🧭 **Auto-discover script paths** from flexible search logic
 * 🪟 **Floating terminal windows** with customizable size, borders, and position
+* 🎨 **Interactive script menu** - Mason-like popup for browsing and executing scripts
 * 🔀 **Dynamic function generation** for each script (e.g. `:lua require('termlet').run_my_script()`)
 * 😹 **Terminal cleanup** and safe resource handling
 * 🧪 **Debug-friendly** with verbose logging option
@@ -58,6 +59,12 @@ Here's the full configuration structure:
     width_ratio = 1.0,
     border = "rounded", -- "none", "single", "double", "rounded", etc.
     position = "bottom" -- "bottom", "center", "top"
+  },
+  menu = {
+    width_ratio = 0.6,  -- Menu window width (fraction of screen)
+    height_ratio = 0.5, -- Menu window height (fraction of screen)
+    border = "rounded", -- Menu border style
+    title = " TermLet Scripts " -- Menu window title
   },
   debug = false,        -- Enable verbose debug logging
 }
@@ -115,8 +122,67 @@ end, { desc = "Close Build Window" })
 
 Or call `require("termlet").list_scripts()` to list all configured scripts.
 
+### Interactive Script Menu
+
+Open a Mason-like popup menu to browse and execute scripts:
+
+```lua
+vim.keymap.set("n", "<leader>ts", function()
+  require("termlet").open_menu()
+end, { desc = "Open TermLet Script Menu" })
+
+-- Or use toggle to open/close with the same key
+vim.keymap.set("n", "<leader>ts", function()
+  require("termlet").toggle_menu()
+end, { desc = "Toggle TermLet Script Menu" })
+```
+
+The menu displays all configured scripts with optional descriptions:
+
+```
+╭─ TermLet Scripts ─────────────────────╮
+│                                       │
+│  > build         Build project        │
+│    test          Run tests            │
+│    deploy        Deploy to staging    │
+│    lint          Run linter           │
+│                                       │
+│ [Enter] Run  [/] Search  [?] Help [q] │
+╰───────────────────────────────────────╯
+```
+
+**Menu Keybindings:**
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `gg` | Go to first script |
+| `G` | Go to last script |
+| `Enter` | Execute selected script |
+| `/` | Enter search/filter mode |
+| `Esc` | Cancel search or close menu |
+| `q` | Close menu |
+| `?` | Toggle help |
+
+**Adding descriptions to scripts:**
+
+```lua
+scripts = {
+  {
+    name = "build",
+    filename = "build.sh",
+    description = "Build the project"  -- Shows in menu
+  },
+}
+```
+
 Additional utility methods:
 
+* `require("termlet").open_menu()` – open the interactive script menu
+* `require("termlet").close_menu()` – close the script menu
+* `require("termlet").toggle_menu()` – toggle the script menu open/closed
+* `require("termlet").is_menu_open()` – check if menu is currently open
 * `require("termlet").close_all_terminals()` – close all terminals
 * `require("termlet").close_terminal()` – close the current or last terminal
 
@@ -133,16 +199,28 @@ require("termlet").setup({
     border = "single",
     position = "top"
   },
+  menu = {
+    width_ratio = 0.5,
+    height_ratio = 0.4,
+    border = "rounded"
+  },
   scripts = {
     {
       name = "build",
-      filename = "build.sh"
+      filename = "build.sh",
+      description = "Build the project"
     },
     {
       name = "test_server",
       filename = "server_test.py",
-      cmd = "python3 server_test.py"
+      cmd = "python3 server_test.py",
+      description = "Run server tests"
     }
   }
 })
+
+-- Open the script menu with <leader>ts
+vim.keymap.set("n", "<leader>ts", function()
+  require("termlet").open_menu()
+end, { desc = "Open TermLet Script Menu" })
 ```
