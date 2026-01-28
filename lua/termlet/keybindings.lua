@@ -1,0 +1,729 @@
+-- TermLet Keybindings Module
+-- Provides a visual interface for configuring and managing keybindings for script execution
+
+local M = {}
+
+-- Keybinding UI state
+local state = {
+  buf = nil,
+  win = nil,
+  scripts = {},
+  selected_index = 1,
+  mode = "normal", -- "normal", "capture", "confirm"
+  captured_key = nil,
+  show_help = false,
+  config = nil,
+  on_save_callback = nil,
+  keybindings = {}, -- script_name -> keybinding mapping
+}
+
+-- Default configuration
+local default_config = {
+  width_ratio = 0.6,
+  height_ratio = 0.5,
+  border = "rounded",
+  title = " TermLet Keybindings ",
+  highlight = {
+    selected = "CursorLine",
+    title = "Title",
+    help = "Comment",
+    keybinding = "String",
+    warning = "WarningMsg",
+    notset = "NonText",
+  },
+}
+
+-- Config file path
+local config_file_path = vim.fn.stdpath("data") .. "/termlet-keybindings.json"
+
+-- Highlight namespace
+local ns_id = vim.api.nvim_create_namespace("termlet_keybindings")
+
+--- Calculate window dimensions and position
+---@param config table Configuration
+---@return table Window options for nvim_open_win
+local function calculate_window_opts(config)
+  local width = math.floor(vim.o.columns * config.width_ratio)
+  local height = math.floor(vim.o.lines * config.height_ratio)
+
+  -- Minimum dimensions
+  width = math.max(width, 50)
+  height = math.max(height, 12)
+
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  return {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    anchor = "NW",
+    style = "minimal",
+    border = config.border,
+    title = config.title,
+    title_pos = "center",
+    footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
+    footer_pos = "center",
+  }
+end
+
+--- Get the help text lines
+---@return table List of help text lines
+local function get_help_lines()
+  return {
+    "",
+    "  Keybindings:",
+    "  ────────────────────────────────",
+    "  j / ↓        Move down",
+    "  k / ↑        Move up",
+    "  c / Enter    Set/change keybinding",
+    "  d            Delete keybinding",
+    "  Escape       Cancel / Close menu",
+    "  q            Close menu",
+    "  ?            Toggle this help",
+    "  gg           Go to first script",
+    "  G            Go to last script",
+    "",
+    "  When capturing keybinding:",
+    "  ────────────────────────────────",
+    "  Press any key or combination...",
+    "  Escape       Cancel capture",
+    "",
+  }
+end
+
+--- Format a keybinding entry for display
+---@param script table Script configuration
+---@param keybinding string|nil Current keybinding
+---@param is_selected boolean Whether this entry is selected
+---@param width number Available width for the line
+---@return string Formatted line
+local function format_keybinding_line(script, keybinding, is_selected, width)
+  local prefix = is_selected and "  > " or "    "
+  local name = script.name or "unnamed"
+
+  -- Calculate column widths
+  local name_width = math.floor(width * 0.35)
+  local key_width = math.floor(width * 0.25)
+
+  -- Format script name
+  local padded_name = name:sub(1, name_width)
+  if #padded_name < name_width then
+    padded_name = padded_name .. string.rep(" ", name_width - #padded_name)
+  end
+
+  -- Format keybinding
+  local key_display
+  if keybinding and keybinding ~= "" then
+    key_display = keybinding
+  else
+    key_display = "(not set)"
+  end
+  local padded_key = key_display:sub(1, key_width)
+  if #padded_key < key_width then
+    padded_key = padded_key .. string.rep(" ", key_width - #padded_key)
+  end
+
+  -- Format action hint
+  local action
+  if keybinding and keybinding ~= "" then
+    action = "[Change] [Clear]"
+  else
+    action = "[Set]"
+  end
+
+  return prefix .. padded_name .. "  " .. padded_key .. "  " .. action
+end
+
+--- Render the keybindings UI
+local function render_ui()
+  if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then
+    return
+  end
+
+  local win_opts = calculate_window_opts(state.config)
+  local width = win_opts.width - 2 -- Account for borders
+
+  -- Clear existing content and highlights
+  vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
+
+  local lines = {}
+  local highlights = {}
+
+  -- Mode-specific rendering
+  if state.mode == "capture" then
+    -- Key capture mode UI
+    table.insert(lines, "")
+    table.insert(lines, "  ╭─ Set Keybinding ─────────────────────────────────╮")
+    table.insert(lines, "  │                                                  │")
+
+    local script_name = state.scripts[state.selected_index] and state.scripts[state.selected_index].name or "unknown"
+    local setting_line = "  │  Setting keybinding for: " .. script_name
+    setting_line = setting_line .. string.rep(" ", 51 - #setting_line) .. "│"
+    table.insert(lines, setting_line)
+
+    table.insert(lines, "  │                                                  │")
+    table.insert(lines, "  │  Press the key combination you want to use...    │")
+    table.insert(lines, "  │  (Press <Esc> to cancel)                         │")
+    table.insert(lines, "  │                                                  │")
+
+    if state.captured_key then
+      local captured_line = "  │  Captured: " .. state.captured_key
+      captured_line = captured_line .. string.rep(" ", 51 - #captured_line) .. "│"
+      table.insert(lines, captured_line)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.keybinding })
+      table.insert(lines, "  │                                                  │")
+      table.insert(lines, "  │  Press Enter to confirm or Esc to cancel        │")
+    else
+      table.insert(lines, "  │  Captured: (waiting...)                         │")
+    end
+
+    table.insert(lines, "  │                                                  │")
+    table.insert(lines, "  ╰──────────────────────────────────────────────────╯")
+  elseif state.show_help then
+    -- Help display
+    for _, help_line in ipairs(get_help_lines()) do
+      table.insert(lines, help_line)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.help })
+    end
+  else
+    -- Normal mode - show keybinding list
+    table.insert(lines, "")
+
+    -- Header
+    local name_width = math.floor(width * 0.35)
+    local key_width = math.floor(width * 0.25)
+    local header = "    " .. "Script" .. string.rep(" ", name_width - 6) .. "  " .. "Keybinding" .. string.rep(" ", key_width - 10) .. "  " .. "Action"
+    table.insert(lines, header)
+
+    local separator = "    " .. string.rep("─", width - 8)
+    table.insert(lines, separator)
+    table.insert(highlights, { line = 1, group = state.config.highlight.title })
+
+    if #state.scripts == 0 then
+      table.insert(lines, "")
+      table.insert(lines, "    No scripts configured")
+      table.insert(lines, "")
+    else
+      for i, script in ipairs(state.scripts) do
+        local is_selected = (i == state.selected_index)
+        local keybinding = state.keybindings[script.name]
+        local line = format_keybinding_line(script, keybinding, is_selected, width)
+        table.insert(lines, line)
+
+        if is_selected then
+          table.insert(highlights, { line = #lines - 1, group = state.config.highlight.selected })
+        elseif not keybinding or keybinding == "" then
+          -- Highlight "(not set)" entries differently
+          table.insert(highlights, { line = #lines - 1, group = state.config.highlight.notset })
+        end
+      end
+    end
+  end
+
+  -- Pad to fill window
+  local target_height = win_opts.height - 2 -- Account for borders
+  while #lines < target_height do
+    table.insert(lines, "")
+  end
+
+  -- Set buffer content
+  vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
+  vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+
+  -- Apply highlights
+  for _, hl in ipairs(highlights) do
+    vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+  end
+end
+
+--- Move selection up
+local function move_up()
+  if state.mode ~= "normal" or state.show_help or #state.scripts == 0 then
+    return
+  end
+
+  state.selected_index = state.selected_index - 1
+  if state.selected_index < 1 then
+    state.selected_index = #state.scripts
+  end
+  render_ui()
+end
+
+--- Move selection down
+local function move_down()
+  if state.mode ~= "normal" or state.show_help or #state.scripts == 0 then
+    return
+  end
+
+  state.selected_index = state.selected_index + 1
+  if state.selected_index > #state.scripts then
+    state.selected_index = 1
+  end
+  render_ui()
+end
+
+--- Go to first item
+local function go_to_first()
+  if state.mode ~= "normal" or state.show_help or #state.scripts == 0 then
+    return
+  end
+  state.selected_index = 1
+  render_ui()
+end
+
+--- Go to last item
+local function go_to_last()
+  if state.mode ~= "normal" or state.show_help or #state.scripts == 0 then
+    return
+  end
+  state.selected_index = #state.scripts
+  render_ui()
+end
+
+--- Toggle help display
+local function toggle_help()
+  if state.mode ~= "normal" then
+    return
+  end
+  state.show_help = not state.show_help
+  render_ui()
+end
+
+--- Check if a keybinding conflicts with another script
+---@param keybinding string The keybinding to check
+---@param exclude_script string|nil Script name to exclude from check
+---@return string|nil Conflicting script name, or nil if no conflict
+local function check_conflict(keybinding, exclude_script)
+  if not keybinding or keybinding == "" then
+    return nil
+  end
+
+  for script_name, existing_key in pairs(state.keybindings) do
+    if script_name ~= exclude_script and existing_key == keybinding then
+      return script_name
+    end
+  end
+
+  return nil
+end
+
+--- Enter key capture mode
+local function enter_capture_mode()
+  if #state.scripts == 0 then
+    return
+  end
+
+  state.mode = "capture"
+  state.captured_key = nil
+
+  -- Update window footer
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    vim.api.nvim_win_set_config(state.win, {
+      footer = " Press key combination or <Esc> to cancel ",
+      footer_pos = "center",
+    })
+  end
+
+  render_ui()
+
+  -- Set up key capture using getcharstr
+  vim.schedule(function()
+    if state.mode ~= "capture" then
+      return
+    end
+
+    local ok, char = pcall(vim.fn.getcharstr)
+    if not ok or not char then
+      -- Cancelled or error
+      state.mode = "normal"
+      render_ui()
+      return
+    end
+
+    -- Check for escape
+    if char == "\27" or char == "" then
+      state.mode = "normal"
+      state.captured_key = nil
+      -- Restore footer
+      if state.win and vim.api.nvim_win_is_valid(state.win) then
+        vim.api.nvim_win_set_config(state.win, {
+          footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
+          footer_pos = "center",
+        })
+      end
+      render_ui()
+      return
+    end
+
+    -- Convert character to key notation
+    local key_notation = vim.fn.keytrans(char)
+
+    -- Handle special cases
+    if key_notation == "" then
+      key_notation = char
+    end
+
+    state.captured_key = key_notation
+    render_ui()
+
+    -- Wait for confirmation (Enter) or cancel (Esc)
+    local function wait_for_confirm()
+      local confirm_ok, confirm_char = pcall(vim.fn.getcharstr)
+      if not confirm_ok or not confirm_char then
+        state.mode = "normal"
+        state.captured_key = nil
+        render_ui()
+        return
+      end
+
+      if confirm_char == "\27" or confirm_char == "" then
+        -- Cancel
+        state.mode = "normal"
+        state.captured_key = nil
+        -- Restore footer
+        if state.win and vim.api.nvim_win_is_valid(state.win) then
+          vim.api.nvim_win_set_config(state.win, {
+            footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
+            footer_pos = "center",
+          })
+        end
+        render_ui()
+      elseif confirm_char == "\r" or confirm_char == "\n" then
+        -- Confirm
+        local script = state.scripts[state.selected_index]
+        if script and state.captured_key then
+          -- Check for conflicts
+          local conflict = check_conflict(state.captured_key, script.name)
+          if conflict then
+            vim.notify("Warning: Keybinding '" .. state.captured_key .. "' is already used by '" .. conflict .. "'", vim.log.levels.WARN)
+          end
+
+          state.keybindings[script.name] = state.captured_key
+          vim.notify("Set keybinding for '" .. script.name .. "' to '" .. state.captured_key .. "'", vim.log.levels.INFO)
+
+          -- Auto-save
+          M.save()
+
+          -- Notify callback
+          if state.on_save_callback then
+            state.on_save_callback(state.keybindings)
+          end
+        end
+
+        state.mode = "normal"
+        state.captured_key = nil
+        -- Restore footer
+        if state.win and vim.api.nvim_win_is_valid(state.win) then
+          vim.api.nvim_win_set_config(state.win, {
+            footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
+            footer_pos = "center",
+          })
+        end
+        render_ui()
+      else
+        -- New key pressed, update captured key
+        local new_key = vim.fn.keytrans(confirm_char)
+        if new_key == "" then
+          new_key = confirm_char
+        end
+        state.captured_key = new_key
+        render_ui()
+        vim.schedule(wait_for_confirm)
+      end
+    end
+
+    vim.schedule(wait_for_confirm)
+  end)
+end
+
+--- Delete the keybinding for the selected script
+local function delete_keybinding()
+  if state.mode ~= "normal" or #state.scripts == 0 then
+    return
+  end
+
+  local script = state.scripts[state.selected_index]
+  if not script then
+    return
+  end
+
+  if state.keybindings[script.name] then
+    state.keybindings[script.name] = nil
+    vim.notify("Cleared keybinding for '" .. script.name .. "'", vim.log.levels.INFO)
+
+    -- Auto-save
+    M.save()
+
+    -- Notify callback
+    if state.on_save_callback then
+      state.on_save_callback(state.keybindings)
+    end
+  else
+    vim.notify("No keybinding set for '" .. script.name .. "'", vim.log.levels.INFO)
+  end
+
+  render_ui()
+end
+
+--- Close the keybindings UI
+function M.close()
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    vim.api.nvim_win_close(state.win, true)
+  end
+  state.win = nil
+  state.buf = nil
+  state.mode = "normal"
+  state.captured_key = nil
+  state.show_help = false
+end
+
+--- Set up keymaps for the keybindings buffer
+local function setup_keymaps()
+  local buf = state.buf
+  local opts = { noremap = true, silent = true, buffer = buf }
+
+  -- Navigation
+  vim.keymap.set("n", "j", move_down, opts)
+  vim.keymap.set("n", "k", move_up, opts)
+  vim.keymap.set("n", "<Down>", move_down, opts)
+  vim.keymap.set("n", "<Up>", move_up, opts)
+  vim.keymap.set("n", "gg", go_to_first, opts)
+  vim.keymap.set("n", "G", go_to_last, opts)
+
+  -- Actions
+  vim.keymap.set("n", "c", enter_capture_mode, opts)
+  vim.keymap.set("n", "<CR>", enter_capture_mode, opts)
+  vim.keymap.set("n", "<Enter>", enter_capture_mode, opts)
+  vim.keymap.set("n", "d", delete_keybinding, opts)
+  vim.keymap.set("n", "q", M.close, opts)
+  vim.keymap.set("n", "<Esc>", function()
+    if state.mode == "capture" then
+      state.mode = "normal"
+      state.captured_key = nil
+      render_ui()
+    else
+      M.close()
+    end
+  end, opts)
+
+  -- Help
+  vim.keymap.set("n", "?", toggle_help, opts)
+end
+
+--- Load keybindings from config file
+---@return table Loaded keybindings
+function M.load()
+  local keybindings = {}
+
+  if vim.fn.filereadable(config_file_path) == 1 then
+    local file = io.open(config_file_path, "r")
+    if file then
+      local content = file:read("*a")
+      file:close()
+
+      local ok, decoded = pcall(vim.fn.json_decode, content)
+      if ok and type(decoded) == "table" then
+        keybindings = decoded
+      end
+    end
+  end
+
+  return keybindings
+end
+
+--- Save keybindings to config file
+---@return boolean Success
+function M.save()
+  -- Ensure directory exists
+  local data_dir = vim.fn.stdpath("data")
+  if vim.fn.isdirectory(data_dir) == 0 then
+    vim.fn.mkdir(data_dir, "p")
+  end
+
+  local file = io.open(config_file_path, "w")
+  if file then
+    local ok, encoded = pcall(vim.fn.json_encode, state.keybindings)
+    if ok then
+      file:write(encoded)
+      file:close()
+      return true
+    else
+      file:close()
+      vim.notify("Failed to encode keybindings", vim.log.levels.ERROR)
+      return false
+    end
+  else
+    vim.notify("Failed to open keybindings file for writing", vim.log.levels.ERROR)
+    return false
+  end
+end
+
+--- Open the keybindings configuration UI
+---@param scripts table List of script configurations
+---@param on_save function|nil Callback when keybindings are saved
+---@param ui_config table|nil Optional UI configuration
+---@return boolean Success
+function M.open(scripts, on_save, ui_config)
+  -- Close existing UI if open
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    M.close()
+  end
+
+  -- Initialize state
+  state.scripts = scripts or {}
+  state.selected_index = 1
+  state.mode = "normal"
+  state.captured_key = nil
+  state.show_help = false
+  state.on_save_callback = on_save
+  state.config = vim.tbl_deep_extend("force", default_config, ui_config or {})
+
+  -- Load saved keybindings
+  state.keybindings = M.load()
+
+  -- Create buffer
+  state.buf = vim.api.nvim_create_buf(false, true)
+  if not state.buf then
+    vim.notify("Failed to create keybindings buffer", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Set buffer options
+  vim.api.nvim_buf_set_option(state.buf, "bufhidden", "wipe")
+  vim.api.nvim_buf_set_option(state.buf, "filetype", "termlet_keybindings")
+  vim.api.nvim_buf_set_option(state.buf, "buflisted", false)
+  vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+
+  -- Create window
+  local win_opts = calculate_window_opts(state.config)
+  state.win = vim.api.nvim_open_win(state.buf, true, win_opts)
+
+  if not state.win then
+    vim.api.nvim_buf_delete(state.buf, { force = true })
+    vim.notify("Failed to create keybindings window", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Set window options
+  vim.api.nvim_win_set_option(state.win, "cursorline", false)
+  vim.api.nvim_win_set_option(state.win, "wrap", false)
+  vim.api.nvim_win_set_option(state.win, "number", false)
+  vim.api.nvim_win_set_option(state.win, "relativenumber", false)
+  vim.api.nvim_win_set_option(state.win, "signcolumn", "no")
+
+  -- Auto-close on buffer leave
+  vim.api.nvim_create_autocmd("BufLeave", {
+    buffer = state.buf,
+    callback = function()
+      M.close()
+    end,
+    once = true,
+  })
+
+  -- Set up keymaps
+  setup_keymaps()
+
+  -- Render initial content
+  render_ui()
+
+  return true
+end
+
+--- Check if keybindings UI is currently open
+---@return boolean
+function M.is_open()
+  return state.win ~= nil and vim.api.nvim_win_is_valid(state.win)
+end
+
+--- Get current keybindings
+---@return table
+function M.get_keybindings()
+  return vim.tbl_deep_extend("force", {}, state.keybindings)
+end
+
+--- Set a keybinding programmatically
+---@param script_name string Name of the script
+---@param keybinding string|nil Keybinding to set (nil to clear)
+---@return boolean Success
+function M.set_keybinding(script_name, keybinding)
+  if not script_name then
+    return false
+  end
+
+  if keybinding == nil or keybinding == "" then
+    state.keybindings[script_name] = nil
+  else
+    -- Check for conflicts
+    local conflict = check_conflict(keybinding, script_name)
+    if conflict then
+      vim.notify("Warning: Keybinding '" .. keybinding .. "' is already used by '" .. conflict .. "'", vim.log.levels.WARN)
+    end
+    state.keybindings[script_name] = keybinding
+  end
+
+  M.save()
+  return true
+end
+
+--- Clear a keybinding programmatically
+---@param script_name string Name of the script
+function M.clear_keybinding(script_name)
+  M.set_keybinding(script_name, nil)
+end
+
+--- Initialize keybindings from saved config
+---@param scripts table List of script configurations
+---@return table Loaded keybindings
+function M.init(scripts)
+  state.scripts = scripts or {}
+  state.keybindings = M.load()
+  return state.keybindings
+end
+
+--- Set config file path (mainly for testing)
+---@param path string Path to config file
+function M.set_config_path(path)
+  config_file_path = path
+end
+
+--- Get config file path
+---@return string
+function M.get_config_path()
+  return config_file_path
+end
+
+--- Get current UI state (for testing)
+---@return table
+function M.get_state()
+  return {
+    selected_index = state.selected_index,
+    mode = state.mode,
+    captured_key = state.captured_key,
+    show_help = state.show_help,
+    scripts_count = #state.scripts,
+    keybindings = vim.tbl_deep_extend("force", {}, state.keybindings),
+  }
+end
+
+--- Programmatically trigger actions (for testing)
+M.actions = {
+  move_up = move_up,
+  move_down = move_down,
+  go_to_first = go_to_first,
+  go_to_last = go_to_last,
+  toggle_help = toggle_help,
+  enter_capture_mode = enter_capture_mode,
+  delete_keybinding = delete_keybinding,
+}
+
+--- Internal: Set keybindings directly (for testing)
+---@param keybindings table
+function M._set_keybindings(keybindings)
+  state.keybindings = keybindings or {}
+end
+
+return M
