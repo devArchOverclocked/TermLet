@@ -47,7 +47,8 @@ describe("termlet.keybindings", function()
 
       assert.equals(1, state.selected_index)
       assert.equals("normal", state.mode)
-      assert.is_nil(state.captured_key)
+      assert.same({}, state.captured_keys)
+      assert.equals("", state.input_text)
       assert.is_false(state.show_help)
       assert.equals(4, state.scripts_count)
     end)
@@ -399,6 +400,149 @@ describe("termlet.keybindings", function()
       -- Note: The callback is called from set_keybinding via the on_save_callback
       -- But set_keybinding bypasses the UI callback flow, so we need to check
       -- the internal save was successful
+      local bindings = keybindings.get_keybindings()
+      assert.equals("<leader>b", bindings["build"])
+    end)
+  end)
+
+  describe("capture mode", function()
+    before_each(function()
+      keybindings.open(test_scripts, nil)
+    end)
+
+    it("should enter capture mode", function()
+      keybindings.actions.enter_capture_mode()
+      local state = keybindings.get_state()
+      assert.equals("capture", state.mode)
+      assert.same({}, state.captured_keys)
+    end)
+
+    it("should not enter capture mode with empty scripts", function()
+      keybindings.close()
+      keybindings.open({}, nil)
+      keybindings.actions.enter_capture_mode()
+      local state = keybindings.get_state()
+      assert.equals("normal", state.mode)
+    end)
+
+    it("should exit capture mode via exit_capture action", function()
+      keybindings.actions.enter_capture_mode()
+      local state = keybindings.get_state()
+      assert.equals("capture", state.mode)
+
+      keybindings.actions.exit_capture()
+      state = keybindings.get_state()
+      assert.equals("normal", state.mode)
+      assert.same({}, state.captured_keys)
+    end)
+
+    it("should track captured keys in state", function()
+      keybindings.actions.enter_capture_mode()
+      keybindings._set_captured_keys({ "<Space>", "b" })
+
+      local state = keybindings.get_state()
+      assert.same({ "<Space>", "b" }, state.captured_keys)
+    end)
+
+    it("should apply captured keybinding via internal function", function()
+      keybindings.open(test_scripts, nil)
+      keybindings._apply_captured_keybinding("<leader>b")
+
+      local bindings = keybindings.get_keybindings()
+      assert.equals("<leader>b", bindings["build"])
+    end)
+
+    it("should not navigate while in capture mode", function()
+      keybindings.actions.enter_capture_mode()
+      local state = keybindings.get_state()
+      local initial_index = state.selected_index
+
+      keybindings.actions.move_down()
+      state = keybindings.get_state()
+      assert.equals(initial_index, state.selected_index)
+    end)
+  end)
+
+  describe("input mode", function()
+    before_each(function()
+      keybindings.open(test_scripts, nil)
+    end)
+
+    it("should enter input mode", function()
+      keybindings.actions.enter_input_mode()
+      local state = keybindings.get_state()
+      assert.equals("input", state.mode)
+      assert.equals("", state.input_text)
+    end)
+
+    it("should not enter input mode with empty scripts", function()
+      keybindings.close()
+      keybindings.open({}, nil)
+      keybindings.actions.enter_input_mode()
+      local state = keybindings.get_state()
+      assert.equals("normal", state.mode)
+    end)
+
+    it("should exit input mode via exit_capture action", function()
+      keybindings.actions.enter_input_mode()
+      local state = keybindings.get_state()
+      assert.equals("input", state.mode)
+
+      keybindings.actions.exit_capture()
+      state = keybindings.get_state()
+      assert.equals("normal", state.mode)
+      assert.equals("", state.input_text)
+    end)
+
+    it("should track input text in state", function()
+      keybindings.actions.enter_input_mode()
+      keybindings._set_input_text("<leader>b")
+
+      local state = keybindings.get_state()
+      assert.equals("<leader>b", state.input_text)
+    end)
+
+    it("should apply typed keybinding via internal function", function()
+      keybindings.open(test_scripts, nil)
+      -- Navigate to second script
+      keybindings.actions.move_down()
+      keybindings._apply_captured_keybinding("<leader>t")
+
+      local bindings = keybindings.get_keybindings()
+      assert.equals("<leader>t", bindings["test"])
+    end)
+
+    it("should not navigate while in input mode", function()
+      keybindings.actions.enter_input_mode()
+      local state = keybindings.get_state()
+      local initial_index = state.selected_index
+
+      keybindings.actions.move_down()
+      state = keybindings.get_state()
+      assert.equals(initial_index, state.selected_index)
+    end)
+  end)
+
+  describe("conflict detection", function()
+    before_each(function()
+      keybindings.open(test_scripts, nil)
+    end)
+
+    it("should detect conflicts when setting duplicate keybinding", function()
+      keybindings.set_keybinding("build", "<leader>b")
+      -- Setting same key for another script should still work but warn
+      keybindings.set_keybinding("test", "<leader>b")
+
+      local bindings = keybindings.get_keybindings()
+      assert.equals("<leader>b", bindings["build"])
+      assert.equals("<leader>b", bindings["test"])
+    end)
+
+    it("should not detect conflict with self", function()
+      keybindings.set_keybinding("build", "<leader>b")
+      -- Re-setting the same key for the same script should not warn
+      keybindings.set_keybinding("build", "<leader>b")
+
       local bindings = keybindings.get_keybindings()
       assert.equals("<leader>b", bindings["build"])
     end)

@@ -9,12 +9,15 @@ local state = {
   win = nil,
   scripts = {},
   selected_index = 1,
-  mode = "normal", -- "normal", "capture", "confirm"
-  captured_key = nil,
+  mode = "normal", -- "normal", "capture", "input"
+  captured_keys = {}, -- list of key notations captured in sequence
+  input_text = "", -- text typed in input mode
   show_help = false,
   config = nil,
   on_save_callback = nil,
   keybindings = {}, -- script_name -> keybinding mapping
+  on_key_ns = nil, -- vim.on_key namespace for capture mode
+  capture_timer = nil, -- timer for finalizing multi-key capture
 }
 
 -- Default configuration
@@ -64,7 +67,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
+    footer = " [c] Capture  [i] Type  [d] Delete  [?] Help  [q] Close ",
     footer_pos = "center",
   }
 end
@@ -78,7 +81,8 @@ local function get_help_lines()
     "  ────────────────────────────────",
     "  j / ↓        Move down",
     "  k / ↑        Move up",
-    "  c / Enter    Set/change keybinding",
+    "  c / Enter    Capture keybinding",
+    "  i            Type keybinding notation",
     "  d            Delete keybinding",
     "  Escape       Cancel / Close menu",
     "  q            Close menu",
@@ -86,10 +90,18 @@ local function get_help_lines()
     "  gg           Go to first script",
     "  G            Go to last script",
     "",
-    "  When capturing keybinding:",
+    "  Capture mode (c / Enter):",
     "  ────────────────────────────────",
-    "  Press any key or combination...",
+    "  Press keys in sequence...",
+    "  Keys are recorded in real-time",
+    "  Enter        Confirm captured keys",
     "  Escape       Cancel capture",
+    "",
+    "  Input mode (i):",
+    "  ────────────────────────────────",
+    "  Type notation: <leader>b, <C-k>",
+    "  Enter        Confirm input",
+    "  Escape       Cancel input",
     "",
   }
 end
@@ -126,12 +138,12 @@ local function format_keybinding_line(script, keybinding, is_selected, width)
     padded_key = padded_key .. string.rep(" ", key_width - #padded_key)
   end
 
-  -- Format action hint
+  -- Format action hint with fixed-width padding for alignment
   local action
   if keybinding and keybinding ~= "" then
     action = "[Change] [Clear]"
   else
-    action = "[Set]"
+    action = "[Set]            "
   end
 
   return prefix .. padded_name .. "  " .. padded_key .. "  " .. action
@@ -154,34 +166,78 @@ local function render_ui()
 
   -- Mode-specific rendering
   if state.mode == "capture" then
-    -- Key capture mode UI
+    -- Real-time key capture mode UI
+    local box_width = math.max(width - 4, 50)
+    local inner_width = box_width - 6 -- account for "  │  " prefix and " │" suffix
+
     table.insert(lines, "")
-    table.insert(lines, "  ╭─ Set Keybinding ─────────────────────────────────╮")
-    table.insert(lines, "  │                                                  │")
+    table.insert(lines, "  ╭─ Capture Keybinding " .. string.rep("─", box_width - 24) .. "╮")
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
 
     local script_name = state.scripts[state.selected_index] and state.scripts[state.selected_index].name or "unknown"
-    local setting_line = "  │  Setting keybinding for: " .. script_name
-    setting_line = setting_line .. string.rep(" ", 51 - #setting_line) .. "│"
+    local setting_text = "Setting keybinding for: " .. script_name
+    local setting_line = "  │  " .. setting_text .. string.rep(" ", inner_width - #setting_text) .. " │"
     table.insert(lines, setting_line)
 
-    table.insert(lines, "  │                                                  │")
-    table.insert(lines, "  │  Press the key combination you want to use...    │")
-    table.insert(lines, "  │  (Press <Esc> to cancel)                         │")
-    table.insert(lines, "  │                                                  │")
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
 
-    if state.captured_key then
-      local captured_line = "  │  Captured: " .. state.captured_key
-      captured_line = captured_line .. string.rep(" ", 51 - #captured_line) .. "│"
-      table.insert(lines, captured_line)
+    local hint_text = "Press keys in sequence (real-time capture)..."
+    table.insert(lines, "  │  " .. hint_text .. string.rep(" ", inner_width - #hint_text) .. " │")
+
+    local esc_text = "Press <Esc> to cancel, <Enter> to confirm"
+    table.insert(lines, "  │  " .. esc_text .. string.rep(" ", inner_width - #esc_text) .. " │")
+
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+
+    local captured_display = #state.captured_keys > 0 and table.concat(state.captured_keys, "") or "(waiting...)"
+    local captured_text = "Captured: " .. captured_display
+    if #captured_text > inner_width then
+      captured_text = captured_text:sub(1, inner_width)
+    end
+    local captured_line = "  │  " .. captured_text .. string.rep(" ", inner_width - #captured_text) .. " │"
+    table.insert(lines, captured_line)
+    if #state.captured_keys > 0 then
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.keybinding })
-      table.insert(lines, "  │                                                  │")
-      table.insert(lines, "  │  Press Enter to confirm or Esc to cancel        │")
-    else
-      table.insert(lines, "  │  Captured: (waiting...)                         │")
     end
 
-    table.insert(lines, "  │                                                  │")
-    table.insert(lines, "  ╰──────────────────────────────────────────────────╯")
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+    table.insert(lines, "  ╰" .. string.rep("─", box_width - 2) .. "╯")
+
+  elseif state.mode == "input" then
+    -- Text input mode UI for typing notation like <leader>b
+    local box_width = math.max(width - 4, 50)
+    local inner_width = box_width - 6
+
+    table.insert(lines, "")
+    table.insert(lines, "  ╭─ Type Keybinding Notation " .. string.rep("─", box_width - 30) .. "╮")
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+
+    local script_name = state.scripts[state.selected_index] and state.scripts[state.selected_index].name or "unknown"
+    local setting_text = "Setting keybinding for: " .. script_name
+    local setting_line = "  │  " .. setting_text .. string.rep(" ", inner_width - #setting_text) .. " │"
+    table.insert(lines, setting_line)
+
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+
+    local hint_text = "Type vim notation (e.g. <leader>b, <C-k>, <A-j>)"
+    table.insert(lines, "  │  " .. hint_text .. string.rep(" ", inner_width - #hint_text) .. " │")
+
+    local esc_text = "Press <Esc> to cancel, <Enter> to confirm"
+    table.insert(lines, "  │  " .. esc_text .. string.rep(" ", inner_width - #esc_text) .. " │")
+
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+
+    local input_display = state.input_text .. "█"
+    local input_text = "Input: " .. input_display
+    if #input_text > inner_width then
+      input_text = input_text:sub(1, inner_width)
+    end
+    local input_line = "  │  " .. input_text .. string.rep(" ", inner_width - #input_text) .. " │"
+    table.insert(lines, input_line)
+    table.insert(highlights, { line = #lines - 1, group = state.config.highlight.keybinding })
+
+    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+    table.insert(lines, "  ╰" .. string.rep("─", box_width - 2) .. "╯")
   elseif state.show_help then
     -- Help display
     for _, help_line in ipairs(get_help_lines()) do
@@ -311,133 +367,222 @@ local function check_conflict(keybinding, exclude_script)
   return nil
 end
 
---- Enter key capture mode
+--- Restore the default footer on the keybindings window
+local function restore_footer()
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    vim.api.nvim_win_set_config(state.win, {
+      footer = " [c] Capture  [i] Type  [d] Delete  [?] Help  [q] Close ",
+      footer_pos = "center",
+    })
+  end
+end
+
+--- Stop the capture timer if running
+local function stop_capture_timer()
+  if state.capture_timer then
+    state.capture_timer:stop()
+    state.capture_timer:close()
+    state.capture_timer = nil
+  end
+end
+
+--- Detach the on_key handler
+local function detach_on_key()
+  if state.on_key_ns then
+    vim.on_key(nil, state.on_key_ns)
+    state.on_key_ns = nil
+  end
+end
+
+--- Apply the captured keybinding to the selected script
+---@param keybinding_str string The keybinding notation string
+local function apply_captured_keybinding(keybinding_str)
+  local script = state.scripts[state.selected_index]
+  if script and keybinding_str and keybinding_str ~= "" then
+    -- Check for conflicts
+    local conflict = check_conflict(keybinding_str, script.name)
+    if conflict then
+      vim.notify("Warning: Keybinding '" .. keybinding_str .. "' is already used by '" .. conflict .. "'", vim.log.levels.WARN)
+    end
+
+    state.keybindings[script.name] = keybinding_str
+    vim.notify("Set keybinding for '" .. script.name .. "' to '" .. keybinding_str .. "'", vim.log.levels.INFO)
+
+    -- Auto-save
+    M.save()
+
+    -- Notify callback
+    if state.on_save_callback then
+      state.on_save_callback(state.keybindings)
+    end
+  end
+end
+
+--- Exit capture or input mode and return to normal
+local function exit_capture()
+  stop_capture_timer()
+  detach_on_key()
+  state.mode = "normal"
+  state.captured_keys = {}
+  state.input_text = ""
+  restore_footer()
+  render_ui()
+end
+
+--- Enter real-time key capture mode using vim.on_key
 local function enter_capture_mode()
   if #state.scripts == 0 then
     return
   end
 
   state.mode = "capture"
-  state.captured_key = nil
+  state.captured_keys = {}
 
   -- Update window footer
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_set_config(state.win, {
-      footer = " Press key combination or <Esc> to cancel ",
+      footer = " Press keys... <Enter> confirm  <Esc> cancel ",
       footer_pos = "center",
     })
   end
 
   render_ui()
 
-  -- Set up key capture using getcharstr
-  vim.schedule(function()
+  -- Use vim.on_key for real-time key capture
+  state.on_key_ns = vim.api.nvim_create_namespace("termlet_key_capture")
+  vim.on_key(function(key, typed)
     if state.mode ~= "capture" then
+      detach_on_key()
       return
     end
 
-    local ok, char = pcall(vim.fn.getcharstr)
-    if not ok or not char then
-      -- Cancelled or error
-      state.mode = "normal"
-      render_ui()
+    -- Use the typed key if available, otherwise the remapped key
+    local raw = typed or key
+    if not raw or raw == "" then
       return
     end
 
-    -- Check for escape
-    if char == "\27" or char == "" then
-      state.mode = "normal"
-      state.captured_key = nil
-      -- Restore footer
-      if state.win and vim.api.nvim_win_is_valid(state.win) then
-        vim.api.nvim_win_set_config(state.win, {
-          footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
-          footer_pos = "center",
-        })
-      end
-      render_ui()
+    -- Translate to key notation
+    local notation = vim.fn.keytrans(raw)
+    if notation == "" then
       return
     end
 
-    -- Convert character to key notation
-    local key_notation = vim.fn.keytrans(char)
-
-    -- Handle special cases
-    if key_notation == "" then
-      key_notation = char
-    end
-
-    state.captured_key = key_notation
-    render_ui()
-
-    -- Wait for confirmation (Enter) or cancel (Esc)
-    local function wait_for_confirm()
-      local confirm_ok, confirm_char = pcall(vim.fn.getcharstr)
-      if not confirm_ok or not confirm_char then
-        state.mode = "normal"
-        state.captured_key = nil
-        render_ui()
+    vim.schedule(function()
+      if state.mode ~= "capture" then
         return
       end
 
-      if confirm_char == "\27" or confirm_char == "" then
-        -- Cancel
-        state.mode = "normal"
-        state.captured_key = nil
-        -- Restore footer
-        if state.win and vim.api.nvim_win_is_valid(state.win) then
-          vim.api.nvim_win_set_config(state.win, {
-            footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
-            footer_pos = "center",
-          })
-        end
-        render_ui()
-      elseif confirm_char == "\r" or confirm_char == "\n" then
-        -- Confirm
-        local script = state.scripts[state.selected_index]
-        if script and state.captured_key then
-          -- Check for conflicts
-          local conflict = check_conflict(state.captured_key, script.name)
-          if conflict then
-            vim.notify("Warning: Keybinding '" .. state.captured_key .. "' is already used by '" .. conflict .. "'", vim.log.levels.WARN)
-          end
-
-          state.keybindings[script.name] = state.captured_key
-          vim.notify("Set keybinding for '" .. script.name .. "' to '" .. state.captured_key .. "'", vim.log.levels.INFO)
-
-          -- Auto-save
-          M.save()
-
-          -- Notify callback
-          if state.on_save_callback then
-            state.on_save_callback(state.keybindings)
-          end
-        end
-
-        state.mode = "normal"
-        state.captured_key = nil
-        -- Restore footer
-        if state.win and vim.api.nvim_win_is_valid(state.win) then
-          vim.api.nvim_win_set_config(state.win, {
-            footer = " [c] Change  [d] Delete  [?] Help  [q] Close ",
-            footer_pos = "center",
-          })
-        end
-        render_ui()
-      else
-        -- New key pressed, update captured key
-        local new_key = vim.fn.keytrans(confirm_char)
-        if new_key == "" then
-          new_key = confirm_char
-        end
-        state.captured_key = new_key
-        render_ui()
-        vim.schedule(wait_for_confirm)
+      -- Check for Escape -> cancel
+      if notation == "<Esc>" then
+        exit_capture()
+        return
       end
+
+      -- Check for Enter -> confirm
+      if notation == "<CR>" then
+        if #state.captured_keys > 0 then
+          local keybinding_str = table.concat(state.captured_keys, "")
+          exit_capture()
+          apply_captured_keybinding(keybinding_str)
+          render_ui()
+        end
+        return
+      end
+
+      -- Append the key to the sequence
+      table.insert(state.captured_keys, notation)
+      render_ui()
+    end)
+  end, state.on_key_ns)
+end
+
+--- Enter text input mode for typing keybinding notation directly
+local function enter_input_mode()
+  if #state.scripts == 0 then
+    return
+  end
+
+  state.mode = "input"
+  state.input_text = ""
+
+  -- Update window footer
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    vim.api.nvim_win_set_config(state.win, {
+      footer = " Type notation... <Enter> confirm  <Esc> cancel ",
+      footer_pos = "center",
+    })
+  end
+
+  render_ui()
+
+  -- Use vim.on_key for real-time text input
+  state.on_key_ns = vim.api.nvim_create_namespace("termlet_key_input")
+  vim.on_key(function(key, typed)
+    if state.mode ~= "input" then
+      detach_on_key()
+      return
     end
 
-    vim.schedule(wait_for_confirm)
-  end)
+    local raw = typed or key
+    if not raw or raw == "" then
+      return
+    end
+
+    local notation = vim.fn.keytrans(raw)
+    if notation == "" then
+      return
+    end
+
+    vim.schedule(function()
+      if state.mode ~= "input" then
+        return
+      end
+
+      -- Check for Escape -> cancel
+      if notation == "<Esc>" then
+        exit_capture()
+        return
+      end
+
+      -- Check for Enter -> confirm
+      if notation == "<CR>" then
+        if state.input_text ~= "" then
+          local keybinding_str = state.input_text
+          exit_capture()
+          apply_captured_keybinding(keybinding_str)
+          render_ui()
+        end
+        return
+      end
+
+      -- Backspace
+      if notation == "<BS>" then
+        if #state.input_text > 0 then
+          state.input_text = state.input_text:sub(1, -2)
+          render_ui()
+        end
+        return
+      end
+
+      -- Only allow printable characters and angle-bracket notation chars
+      local char = raw
+      if #notation == 1 then
+        char = notation
+      elseif notation == "<lt>" then
+        char = "<"
+      elseif notation == "<Space>" then
+        char = " "
+      else
+        -- For modifier keys like <C-x>, <A-x>, ignore them as raw input
+        -- since user is typing notation text
+        return
+      end
+
+      state.input_text = state.input_text .. char
+      render_ui()
+    end)
+  end, state.on_key_ns)
 end
 
 --- Delete the keybinding for the selected script
@@ -471,13 +616,18 @@ end
 
 --- Close the keybindings UI
 function M.close()
+  -- Clean up capture state
+  stop_capture_timer()
+  detach_on_key()
+
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
   end
   state.win = nil
   state.buf = nil
   state.mode = "normal"
-  state.captured_key = nil
+  state.captured_keys = {}
+  state.input_text = ""
   state.show_help = false
 end
 
@@ -498,13 +648,12 @@ local function setup_keymaps()
   vim.keymap.set("n", "c", enter_capture_mode, opts)
   vim.keymap.set("n", "<CR>", enter_capture_mode, opts)
   vim.keymap.set("n", "<Enter>", enter_capture_mode, opts)
+  vim.keymap.set("n", "i", enter_input_mode, opts)
   vim.keymap.set("n", "d", delete_keybinding, opts)
   vim.keymap.set("n", "q", M.close, opts)
   vim.keymap.set("n", "<Esc>", function()
-    if state.mode == "capture" then
-      state.mode = "normal"
-      state.captured_key = nil
-      render_ui()
+    if state.mode == "capture" or state.mode == "input" then
+      exit_capture()
     else
       M.close()
     end
@@ -577,7 +726,8 @@ function M.open(scripts, on_save, ui_config)
   state.scripts = scripts or {}
   state.selected_index = 1
   state.mode = "normal"
-  state.captured_key = nil
+  state.captured_keys = {}
+  state.input_text = ""
   state.show_help = false
   state.on_save_callback = on_save
   state.config = vim.tbl_deep_extend("force", default_config, ui_config or {})
@@ -702,7 +852,8 @@ function M.get_state()
   return {
     selected_index = state.selected_index,
     mode = state.mode,
-    captured_key = state.captured_key,
+    captured_keys = vim.tbl_deep_extend("force", {}, state.captured_keys),
+    input_text = state.input_text,
     show_help = state.show_help,
     scripts_count = #state.scripts,
     keybindings = vim.tbl_deep_extend("force", {}, state.keybindings),
@@ -717,8 +868,28 @@ M.actions = {
   go_to_last = go_to_last,
   toggle_help = toggle_help,
   enter_capture_mode = enter_capture_mode,
+  enter_input_mode = enter_input_mode,
+  exit_capture = exit_capture,
   delete_keybinding = delete_keybinding,
 }
+
+--- Apply a captured keybinding programmatically (for testing)
+---@param keybinding_str string
+function M._apply_captured_keybinding(keybinding_str)
+  apply_captured_keybinding(keybinding_str)
+end
+
+--- Set captured keys directly (for testing)
+---@param keys table List of key notation strings
+function M._set_captured_keys(keys)
+  state.captured_keys = keys or {}
+end
+
+--- Set input text directly (for testing)
+---@param text string
+function M._set_input_text(text)
+  state.input_text = text or ""
+end
 
 --- Internal: Set keybindings directly (for testing)
 ---@param keybindings table

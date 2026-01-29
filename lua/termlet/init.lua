@@ -524,11 +524,18 @@ local function execute_script(script)
   return true
 end
 
--- Keybinding group for managing termlet keybindings
-local keybinding_group = vim.api.nvim_create_augroup("TermLetKeybindings", { clear = true })
+-- Track previously applied keybindings so they can be removed on reapply
+local applied_keybindings = {} -- { key = script_name }
 
 -- Apply keybindings from saved configuration
 local function apply_keybindings()
+  -- Remove previously applied keybindings
+  for key, _ in pairs(applied_keybindings) do
+    pcall(vim.keymap.del, "n", key)
+    debug_log("Removed old keybinding: " .. key)
+  end
+  applied_keybindings = {}
+
   local saved_keybindings = keybindings.get_keybindings()
 
   for _, script in ipairs(config.scripts) do
@@ -546,6 +553,7 @@ local function apply_keybindings()
             desc = "TermLet: " .. (script.description or script.name),
           })
         end)
+        applied_keybindings[key] = script.name
         debug_log("Applied keybinding " .. key .. " for script: " .. script.name)
       end
     end
