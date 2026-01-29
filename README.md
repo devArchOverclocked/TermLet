@@ -109,10 +109,16 @@ Each script object must include:
 {
   name = "my_script",
   filename = "run.sh",      -- Required
-  root_dir = "~/project",   -- Optional
+  root_dir = "~/project",   -- Optional (inherits from global root_dir)
   search_dirs = {"scripts"} -- Optional
 }
 ```
+
+The `filename` field supports three resolution modes:
+
+1. **Plain filename** (e.g., `"build.sh"`) — Searched recursively from `root_dir`. You only need to provide the root directory and the filename; TermLet will find it anywhere in the directory tree.
+2. **Relative path** (e.g., `"subdir/build.sh"`) — First resolved relative to `root_dir`. If not found, the basename is searched recursively.
+3. **Absolute path** (e.g., `"/usr/local/bin/check.sh"` or `"~/scripts/deploy.sh"`) — Used directly, allowing you to run scripts outside of `root_dir`.
 
 ### Or with `dir_name` + `relative_path` (Legacy):
 
@@ -121,6 +127,27 @@ Each script object must include:
   name = "legacy_task",
   dir_name = "tools",
   relative_path = "run_legacy.sh"
+}
+```
+
+### Recursive File Search
+
+When using `filename` with a `root_dir`, TermLet searches for your script in this order:
+
+1. **Direct match** — `{root_dir}/{filename}`
+2. **Common directories** — Checks `scripts/`, `bin/`, `tools/`, `build/`, `.scripts/`, `dev/`, `development/`, `utils/`, `automation/` within `root_dir`
+3. **Recursive fallback** — Scans the full directory tree under `root_dir` (up to 5 levels deep)
+
+Hidden directories (starting with `.`) and `node_modules` are excluded from recursive search.
+
+You can customize the search directories per script:
+
+```lua
+{
+  name = "deploy",
+  filename = "deploy.sh",
+  root_dir = "~/project",
+  search_dirs = { "devops", "ci", "scripts" }
 }
 ```
 
