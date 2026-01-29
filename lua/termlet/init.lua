@@ -270,6 +270,7 @@ function M.create_floating_terminal(opts)
     term_config = term_config,
   }
 
+
   -- Auto-cleanup on window close
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(win),

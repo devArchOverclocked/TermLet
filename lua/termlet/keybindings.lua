@@ -230,9 +230,9 @@ local function render_ui()
   end
 
   -- Set buffer content
-  vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
+  vim.bo[state.buf].modifiable = true
   vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+  vim.bo[state.buf].modifiable = false
 
   -- Apply highlights
   for _, hl in ipairs(highlights) do
@@ -593,10 +593,10 @@ function M.open(scripts, on_save, ui_config)
   end
 
   -- Set buffer options
-  vim.api.nvim_buf_set_option(state.buf, "bufhidden", "wipe")
-  vim.api.nvim_buf_set_option(state.buf, "filetype", "termlet_keybindings")
-  vim.api.nvim_buf_set_option(state.buf, "buflisted", false)
-  vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+  vim.bo[state.buf].bufhidden = "wipe"
+  vim.bo[state.buf].filetype = "termlet_keybindings"
+  vim.bo[state.buf].buflisted = false
+  vim.bo[state.buf].modifiable = false
 
   -- Create window
   local win_opts = calculate_window_opts(state.config)
@@ -609,11 +609,11 @@ function M.open(scripts, on_save, ui_config)
   end
 
   -- Set window options
-  vim.api.nvim_win_set_option(state.win, "cursorline", false)
-  vim.api.nvim_win_set_option(state.win, "wrap", false)
-  vim.api.nvim_win_set_option(state.win, "number", false)
-  vim.api.nvim_win_set_option(state.win, "relativenumber", false)
-  vim.api.nvim_win_set_option(state.win, "signcolumn", "no")
+  vim.wo[state.win].cursorline = false
+  vim.wo[state.win].wrap = false
+  vim.wo[state.win].number = false
+  vim.wo[state.win].relativenumber = false
+  vim.wo[state.win].signcolumn = "no"
 
   -- Auto-close on buffer leave
   vim.api.nvim_create_autocmd("BufLeave", {
