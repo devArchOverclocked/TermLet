@@ -10,8 +10,12 @@ local config = {
   buffer_size = 50, -- Number of lines to keep in buffer for multi-line detection
 }
 
--- Pattern registry for different languages
-M.patterns = {}
+-- Pattern registry: ordered list of { language = string, config = table, priority = number }
+-- Higher priority patterns are checked first. Use ipairs() for deterministic order.
+local pattern_list = {}
+
+-- Lookup table for quick access by language name
+local pattern_lookup = {}
 
 -- Metadata storage: maps buffer_id -> { line_number -> file_info }
 local buffer_metadata = {}
@@ -41,7 +45,38 @@ function M.register_pattern(language, pattern_config)
     error("Pattern config must include 'pattern' field")
   end
 
-  M.patterns[language] = pattern_config
+  local priority = pattern_config.priority or 0
+
+  -- Remove existing entry for this language if re-registering
+  if pattern_lookup[language] then
+    for i, entry in ipairs(pattern_list) do
+      if entry.language == language then
+        table.remove(pattern_list, i)
+        break
+      end
+    end
+  end
+
+  local entry = {
+    language = language,
+    config = pattern_config,
+    priority = priority,
+  }
+
+  -- Insert in priority order (higher priority first)
+  local inserted = false
+  for i, existing in ipairs(pattern_list) do
+    if priority > existing.priority then
+      table.insert(pattern_list, i, entry)
+      inserted = true
+      break
+    end
+  end
+  if not inserted then
+    table.insert(pattern_list, entry)
+  end
+
+  pattern_lookup[language] = pattern_config
 end
 
 ---Check if a language is enabled for detection
@@ -136,6 +171,12 @@ function M.resolve_path(file_path, cwd)
     return nil
   end
 
+  -- Expand tilde (~) to user's home directory
+  if file_path:sub(1, 1) == "~" then
+    local home = vim.loop.os_homedir() or os.getenv("HOME") or ""
+    file_path = home .. file_path:sub(2)
+  end
+
   -- Check if already absolute
   if file_path:sub(1, 1) == "/" then
     return file_path
@@ -167,13 +208,14 @@ function M.process_line(line, cwd)
     return nil
   end
 
-  for language, pattern_config in pairs(M.patterns) do
-    if is_language_enabled(language) then
+  -- Iterate in deterministic priority order using ipairs on the ordered list
+  for _, entry in ipairs(pattern_list) do
+    if is_language_enabled(entry.language) then
       -- Check if line matches the stack trace pattern
-      if match_pattern(line, pattern_config.pattern) then
-        local file_info = M.extract_file_info(line, pattern_config, cwd)
+      if match_pattern(line, entry.config.pattern) then
+        local file_info = M.extract_file_info(line, entry.config, cwd)
         if file_info then
-          file_info.language = language
+          file_info.language = entry.language
           file_info.raw_line = line
           return file_info
         end
@@ -240,20 +282,31 @@ function M.process_terminal_output(data, cwd, buffer_id)
     return {}
   end
 
+  -- Get the current terminal buffer line count to key metadata correctly.
+  -- The metadata must be keyed on the actual Neovim buffer line number so that
+  -- find_nearest_metadata (called with cursor position) can locate entries.
+  local terminal_line_count = 0
+  if buffer_id and vim.api.nvim_buf_is_valid(buffer_id) then
+    terminal_line_count = vim.api.nvim_buf_line_count(buffer_id)
+  end
+
   local results = {}
+  local line_offset = 0
 
   for _, line in ipairs(data) do
     if line and line ~= "" then
       add_to_buffer(line)
+      line_offset = line_offset + 1
 
       local file_info = M.process_line(line, cwd)
       if file_info then
-        file_info.buffer_line = #output_buffer
+        local buffer_line = terminal_line_count + line_offset
+        file_info.buffer_line = buffer_line
         table.insert(results, file_info)
 
-        -- Store in buffer metadata if buffer_id provided
+        -- Store in buffer metadata keyed on actual terminal buffer line number
         if buffer_id then
-          M.store_metadata(buffer_id, #output_buffer, file_info)
+          M.store_metadata(buffer_id, buffer_line, file_info)
         end
       end
     end
@@ -341,14 +394,20 @@ function M.setup(user_config)
   end
 
   -- Register built-in patterns if none exist
-  if vim.tbl_count(M.patterns) == 0 then
+  if #pattern_list == 0 then
     M.register_builtin_patterns()
   end
 end
 
 ---Register built-in stack trace patterns for common languages
 function M.register_builtin_patterns()
-  -- Python stack trace pattern
+  -- Patterns are registered with a priority field. Higher priority patterns are
+  -- checked first, which avoids false positives from broad patterns matching
+  -- lines intended for more specific ones. Language-keyword patterns (containing
+  -- distinguishing tokens like "File", "at", "in") get higher priority than
+  -- generic file:line patterns.
+
+  -- Python stack trace pattern (priority 10: has unique "File" keyword)
   -- Example: File "/path/to/file.py", line 42, in function_name
   M.register_pattern("python", {
     pattern = 'File "([^"]+)", line (%d+)',
@@ -356,9 +415,10 @@ function M.register_builtin_patterns()
     line_pattern = "line (%d+)",
     context_pattern = "in ([%w_]+)$",
     multiline = false,
+    priority = 10,
   })
 
-  -- C# stack trace pattern
+  -- C# stack trace pattern (priority 10: has unique "in ... :line" keyword)
   -- Example: at Namespace.Class.Method() in /path/to/file.cs:line 42
   M.register_pattern("csharp", {
     pattern = "in ([^:]+):line (%d+)",
@@ -366,11 +426,11 @@ function M.register_builtin_patterns()
     line_pattern = ":line (%d+)",
     context_pattern = "at ([^%(]+)%(",
     multiline = false,
+    priority = 10,
   })
 
-  -- JavaScript/Node.js stack trace pattern
+  -- JavaScript/Node.js stack trace pattern (priority 8: has "at" + parens)
   -- Example: at functionName (/path/to/file.js:42:15)
-  -- Example: at /path/to/file.js:42:15
   M.register_pattern("javascript", {
     pattern = "at .* %(([^:]+):(%d+):(%d+)%)",
     file_pattern = "%(([^:]+):%d+:%d+%)",
@@ -378,37 +438,20 @@ function M.register_builtin_patterns()
     column_pattern = ":%d+:(%d+)%)",
     context_pattern = "at ([^%(]+) %(",
     multiline = false,
+    priority = 8,
   })
 
-  -- JavaScript/Node.js alternative pattern (no parentheses)
+  -- JavaScript/Node.js alternative pattern (priority 5: generic "at file:line:col")
   M.register_pattern("javascript_alt", {
     pattern = "at ([^:]+):(%d+):(%d+)$",
     file_pattern = "at ([^:]+):%d+:%d+$",
     line_pattern = ":(%d+):%d+$",
     column_pattern = ":%d+:(%d+)$",
     multiline = false,
+    priority = 5,
   })
 
-  -- Go stack trace pattern
-  -- Example: /path/to/file.go:42 +0x123
-  M.register_pattern("go", {
-    pattern = "^%s*([^%s]+%.go):(%d+)",
-    file_pattern = "^%s*([^%s]+%.go):%d+",
-    line_pattern = "%.go:(%d+)",
-    multiline = false,
-  })
-
-  -- Rust stack trace pattern
-  -- Example: at /path/to/file.rs:42:15
-  M.register_pattern("rust", {
-    pattern = "at ([^:]+%.rs):(%d+):(%d+)",
-    file_pattern = "at ([^:]+%.rs):%d+:%d+",
-    line_pattern = "%.rs:(%d+):%d+",
-    column_pattern = "%.rs:%d+:(%d+)",
-    multiline = false,
-  })
-
-  -- Java stack trace pattern
+  -- Java stack trace pattern (priority 8: has "at" + parens with .java extension)
   -- Example: at com.example.Class.method(File.java:42)
   M.register_pattern("java", {
     pattern = "at [^%(]+%(([^:]+):(%d+)%)",
@@ -416,18 +459,21 @@ function M.register_builtin_patterns()
     line_pattern = ":(%d+)%)",
     context_pattern = "at ([^%(]+)%(",
     multiline = false,
+    priority = 8,
   })
 
-  -- Lua stack trace pattern
-  -- Example: /path/to/file.lua:42: error message
-  M.register_pattern("lua", {
-    pattern = "^%s*([^:]+%.lua):(%d+):",
-    file_pattern = "^%s*([^:]+%.lua):%d+:",
-    line_pattern = "%.lua:(%d+):",
+  -- Rust stack trace pattern (priority 7: has "at" + .rs extension)
+  -- Example: at /path/to/file.rs:42:15
+  M.register_pattern("rust", {
+    pattern = "at ([^:]+%.rs):(%d+):(%d+)",
+    file_pattern = "at ([^:]+%.rs):%d+:%d+",
+    line_pattern = "%.rs:(%d+):%d+",
+    column_pattern = "%.rs:%d+:(%d+)",
     multiline = false,
+    priority = 7,
   })
 
-  -- Ruby stack trace pattern
+  -- Ruby stack trace pattern (priority 7: has .rb extension + "in" keyword)
   -- Example: /path/to/file.rb:42:in `method_name'
   M.register_pattern("ruby", {
     pattern = "([^:]+%.rb):(%d+):in",
@@ -435,6 +481,131 @@ function M.register_builtin_patterns()
     line_pattern = "%.rb:(%d+):in",
     context_pattern = ":in `([^']+)'",
     multiline = false,
+    priority = 7,
+  })
+
+  -- Elixir/Erlang stack trace pattern (priority 7: has parens + .ex/.erl extension)
+  -- Example: (my_app 0.1.0) lib/my_app/worker.ex:42: MyApp.Worker.run/1
+  -- Example: lib/my_app.ex:42: (module)
+  M.register_pattern("elixir", {
+    pattern = "([^:]+%.exs?):(%d+):",
+    file_pattern = "([^:]+%.exs?):%d+:",
+    line_pattern = "%.exs?:(%d+):",
+    multiline = false,
+    priority = 7,
+  })
+
+  -- Erlang stack trace pattern
+  -- Example: {module,function,1,[{file,"src/module.erl"},{line,42}]}
+  M.register_pattern("erlang", {
+    pattern = '{file,"([^"]+%.erl)"}.*{line,(%d+)}',
+    file_pattern = '{file,"([^"]+%.erl)"}',
+    line_pattern = "{line,(%d+)}",
+    multiline = false,
+    priority = 7,
+  })
+
+  -- Swift stack trace pattern (priority 6: has .swift extension)
+  -- Example: /path/to/file.swift:42: error: something went wrong
+  -- Example: /path/to/file.swift:42:15: error: description
+  M.register_pattern("swift", {
+    pattern = "([^:]+%.swift):(%d+):",
+    file_pattern = "([^:]+%.swift):%d+:",
+    line_pattern = "%.swift:(%d+):",
+    column_pattern = "%.swift:%d+:(%d+):",
+    multiline = false,
+    priority = 6,
+  })
+
+  -- Kotlin stack trace pattern (priority 9: uses Java-style "at" keyword + .kt extension,
+  -- higher priority than generic Java pattern to avoid Kotlin traces matching as Java)
+  -- Example: at com.example.MyClass.method(MyFile.kt:42)
+  M.register_pattern("kotlin", {
+    pattern = "at [^%(]+%(([^:]+%.kt):(%d+)%)",
+    file_pattern = "%(([^:]+%.kt):%d+%)",
+    line_pattern = ":(%d+)%)",
+    context_pattern = "at ([^%(]+)%(",
+    multiline = false,
+    priority = 9,
+  })
+
+  -- Haskell stack trace pattern (priority 6: has .hs extension)
+  -- Example: /path/to/file.hs:42:15: error:
+  -- Example: CallStack (from HasCallStack):  module, called at src/Module.hs:42:15
+  M.register_pattern("haskell", {
+    pattern = "([^:]+%.hs):(%d+):",
+    file_pattern = "([^:]+%.hs):%d+:",
+    line_pattern = "%.hs:(%d+):",
+    column_pattern = "%.hs:%d+:(%d+):",
+    multiline = false,
+    priority = 6,
+  })
+
+  -- PHP stack trace pattern (priority 6: has .php extension + specific format)
+  -- Example: /path/to/file.php:42
+  -- Example: #0 /path/to/file.php(42): ClassName->method()
+  M.register_pattern("php", {
+    pattern = "([^:%(]+%.php)[:(](%d+)",
+    file_pattern = "([^:%(]+%.php)[:(]%d+",
+    line_pattern = "%.php[:(](%d+)",
+    multiline = false,
+    priority = 6,
+  })
+
+  -- Perl stack trace pattern (priority 7: has .pl/.pm extension + "at" + "line" keywords)
+  -- Example: at /path/to/script.pl line 42.
+  -- Example: at /path/to/Module.pm line 42
+  M.register_pattern("perl", {
+    pattern = "at ([^%s]+%.p[lm]) line (%d+)",
+    file_pattern = "at ([^%s]+%.p[lm]) line",
+    line_pattern = "line (%d+)",
+    multiline = false,
+    priority = 7,
+  })
+
+  -- C/C++ stack trace pattern (GCC/Clang compiler errors, priority 5: generic file:line)
+  -- Example: /path/to/file.c:42:15: error: expected ';'
+  -- Example: /path/to/file.cpp:42: undefined reference
+  -- Example: file.h:42:10: warning: unused variable
+  M.register_pattern("c_cpp", {
+    pattern = "([^:%s]+%.c[pp]?[px]?[x]?):(%d+):",
+    file_pattern = "([^:%s]+%.c[pp]?[px]?[x]?):%d+:",
+    line_pattern = "%.c[pp]?[px]?[x]?:(%d+):",
+    column_pattern = "%.c[pp]?[px]?[x]?:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C/C++ header files
+  -- Example: /path/to/file.h:42:10: note: declared here
+  -- Example: /path/to/file.hpp:42: error
+  M.register_pattern("c_cpp_header", {
+    pattern = "([^:%s]+%.h[pp]?[px]?[x]?):(%d+):",
+    file_pattern = "([^:%s]+%.h[pp]?[px]?[x]?):%d+:",
+    line_pattern = "%.h[pp]?[px]?[x]?:(%d+):",
+    column_pattern = "%.h[pp]?[px]?[x]?:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- Go stack trace pattern (priority 5: generic .go:line)
+  -- Example: /path/to/file.go:42 +0x123
+  M.register_pattern("go", {
+    pattern = "^%s*([^%s]+%.go):(%d+)",
+    file_pattern = "^%s*([^%s]+%.go):%d+",
+    line_pattern = "%.go:(%d+)",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- Lua stack trace pattern (priority 5: generic .lua:line)
+  -- Example: /path/to/file.lua:42: error message
+  M.register_pattern("lua", {
+    pattern = "^%s*([^:]+%.lua):(%d+):",
+    file_pattern = "^%s*([^:]+%.lua):%d+:",
+    line_pattern = "%.lua:(%d+):",
+    multiline = false,
+    priority = 5,
   })
 end
 
@@ -460,10 +631,16 @@ function M.get_config()
   return vim.deepcopy(config)
 end
 
----Get all registered patterns
----@return table The registered patterns
+---Get all registered patterns (returns a deep copy for safety)
+---@return table A copy of the pattern lookup table keyed by language name
 function M.get_patterns()
-  return M.patterns
+  return vim.deepcopy(pattern_lookup)
+end
+
+---Get the ordered pattern list (returns a deep copy for safety)
+---@return table[] Ordered list of { language, config, priority }
+function M.get_pattern_list()
+  return vim.deepcopy(pattern_list)
 end
 
 return M

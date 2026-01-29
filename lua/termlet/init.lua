@@ -386,10 +386,12 @@ local function execute_script(script)
     return false
   end
 
-  -- Clear stacktrace buffer for new execution
+  -- Clear stacktrace buffer and all metadata for new execution.
+  -- We use clear_all_metadata() rather than clear_metadata(buf) because Neovim
+  -- can recycle buffer IDs, so stale metadata from previous buffers may persist.
   if config.stacktrace.enabled then
     stacktrace.clear_buffer()
-    stacktrace.clear_metadata(buf)
+    stacktrace.clear_all_metadata()
   end
 
   -- Determine command based on file extension or explicit command
@@ -612,6 +614,29 @@ function M.goto_stacktrace()
   if file_info and file_info.path then
     -- Check if file exists
     if vim.fn.filereadable(file_info.path) == 1 then
+      -- If the current window is a floating terminal, close it first and find
+      -- a regular (non-floating) window to open the file in.
+      local current_win = vim.api.nvim_get_current_win()
+      local win_config = vim.api.nvim_win_get_config(current_win)
+      if win_config.relative and win_config.relative ~= "" then
+        -- We're in a floating window — close it
+        vim.api.nvim_win_close(current_win, true)
+        -- Try to find a non-floating window to switch to
+        local found_regular_win = false
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          local wc = vim.api.nvim_win_get_config(win)
+          if (not wc.relative or wc.relative == "") and vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_set_current_win(win)
+            found_regular_win = true
+            break
+          end
+        end
+        if not found_regular_win then
+          -- No regular window found, create a new split
+          vim.cmd("new")
+        end
+      end
+
       vim.cmd("edit " .. vim.fn.fnameescape(file_info.path))
       if file_info.line then
         vim.api.nvim_win_set_cursor(0, { file_info.line, (file_info.column or 1) - 1 })
