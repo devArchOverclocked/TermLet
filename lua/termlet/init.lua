@@ -150,8 +150,9 @@ local function should_exclude_file(name, search_config)
   search_config = search_config or config.search
 
   for _, pattern in ipairs(search_config.exclude_patterns or {}) do
-    -- Convert glob pattern to Lua pattern: * -> .*, ? -> ., . -> %.
-    local lua_pattern = "^" .. pattern:gsub("%.", "%%."):gsub("%*", ".*"):gsub("%?", ".") .. "$"
+    -- Escape all Lua pattern metacharacters first, then convert glob wildcards
+    local lua_pattern = pattern:gsub("([%(%)%.%%%+%-%[%]%^%$])", "%%%1")
+    lua_pattern = "^" .. lua_pattern:gsub("%*", ".*"):gsub("%?", ".") .. "$"
     if name:match(lua_pattern) then
       return true
     end
@@ -308,7 +309,13 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   local function search_in_dir(dir_path, target_file, max_depth)
     max_depth = max_depth or 5 -- Increased depth for root-based search
     if max_depth <= 0 then return nil end
-    
+
+    -- Check if the target file itself is excluded by patterns
+    if should_exclude_file(target_file, config.search) then
+      debug_log("Skipping excluded target file: " .. target_file)
+      return nil
+    end
+
     local full_path = dir_path .. "/" .. target_file
     if vim.fn.filereadable(full_path) == 1 then
       debug_log("Found script at: " .. full_path)
@@ -340,10 +347,14 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   end
   
   -- First, try direct search in root directory
-  local direct_path = search_root .. "/" .. filename
-  if vim.fn.filereadable(direct_path) == 1 then
-    debug_log("Found script directly at: " .. direct_path)
-    return direct_path
+  if not should_exclude_file(filename, config.search) then
+    local direct_path = search_root .. "/" .. filename
+    if vim.fn.filereadable(direct_path) == 1 then
+      debug_log("Found script directly at: " .. direct_path)
+      return direct_path
+    end
+  else
+    debug_log("Skipping excluded file in direct search: " .. filename)
   end
   
   -- Then search in common script directories within root

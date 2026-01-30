@@ -884,6 +884,47 @@ describe("termlet", function()
       termlet.setup({ scripts = {} })
       assert.is_false(termlet._should_exclude_file("anything.js", nil))
     end)
+
+    it("should handle glob patterns containing Lua metacharacters", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.log+", "file[1].txt", "foo(bar).js" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      -- Literal + in pattern should match literal +
+      assert.is_true(termlet._should_exclude_file("app.log+", search_config))
+      assert.is_false(termlet._should_exclude_file("app.logg", search_config))
+      -- Literal brackets should match literally
+      assert.is_true(termlet._should_exclude_file("file[1].txt", search_config))
+      assert.is_false(termlet._should_exclude_file("file2.txt", search_config))
+      -- Literal parentheses should match literally
+      assert.is_true(termlet._should_exclude_file("foo(bar).js", search_config))
+      assert.is_false(termlet._should_exclude_file("foobar.js", search_config))
+    end)
+
+    it("should handle glob patterns with - and ^ characters", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "my-file.*", "^start.txt" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("my-file.js", search_config))
+      assert.is_true(termlet._should_exclude_file("^start.txt", search_config))
+      assert.is_false(termlet._should_exclude_file("myXfile.js", search_config))
+    end)
+
+    it("should handle glob patterns with % character", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "100%.txt" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("100%.txt", search_config))
+      assert.is_false(termlet._should_exclude_file("100X.txt", search_config))
+    end)
   end)
 
   describe("search configuration", function()
@@ -940,6 +981,106 @@ describe("termlet", function()
       assert.is_true(termlet._should_exclude_file("app.min.js", nil))
       assert.is_true(termlet._should_exclude_file("vendor.bundle.js", nil))
       assert.is_false(termlet._should_exclude_file("app.js", nil))
+    end)
+  end)
+
+  describe("find_script_by_name file exclusion integration", function()
+    local tmpdir
+
+    before_each(function()
+      tmpdir = vim.fn.tempname()
+      vim.fn.mkdir(tmpdir, "p")
+    end)
+
+    after_each(function()
+      vim.fn.delete(tmpdir, "rf")
+    end)
+
+    it("should skip files matching exclude_patterns", function()
+      -- Create a script file that matches an exclusion pattern
+      local script_path = tmpdir .. "/build.min.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = {},
+          exclude_hidden = false,
+          exclude_patterns = { "*.min.*" },
+        },
+      })
+
+      local result = termlet.find_script_by_name("build.min.sh", tmpdir, { "." })
+      assert.is_nil(result)
+    end)
+
+    it("should find files not matching exclude_patterns", function()
+      -- Create a script file that does NOT match any exclusion pattern
+      local script_path = tmpdir .. "/build.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = {},
+          exclude_hidden = false,
+          exclude_patterns = { "*.min.*" },
+        },
+      })
+
+      local result = termlet.find_script_by_name("build.sh", tmpdir, { "." })
+      assert.is_not_nil(result)
+      assert.is_truthy(result:find("build.sh", 1, true))
+    end)
+
+    it("should skip files in excluded directories", function()
+      -- Create a subdirectory that should be excluded and put a script in it
+      local excluded_dir = tmpdir .. "/node_modules"
+      vim.fn.mkdir(excluded_dir, "p")
+      local script_path = excluded_dir .. "/run.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "node_modules" },
+          exclude_hidden = false,
+          exclude_patterns = {},
+        },
+      })
+
+      -- Search should not find the file inside excluded directory
+      local result = termlet.find_script_by_name("run.sh", tmpdir, { "." })
+      assert.is_nil(result)
+    end)
+
+    it("should find files in non-excluded directories", function()
+      -- Create a subdirectory that is NOT excluded and put a script in it
+      local scripts_dir = tmpdir .. "/scripts"
+      vim.fn.mkdir(scripts_dir, "p")
+      local script_path = scripts_dir .. "/run.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "node_modules" },
+          exclude_hidden = false,
+          exclude_patterns = {},
+        },
+      })
+
+      local result = termlet.find_script_by_name("run.sh", tmpdir, { "scripts" })
+      assert.is_not_nil(result)
+      assert.is_truthy(result:find("run.sh", 1, true))
     end)
   end)
 end)
