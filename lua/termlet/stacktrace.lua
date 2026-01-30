@@ -622,27 +622,90 @@ function M.register_builtin_patterns()
     priority = 7,
   })
 
-  -- C/C++ stack trace pattern (GCC/Clang compiler errors, priority 5: generic file:line)
+  -- C source files
   -- Example: /path/to/file.c:42:15: error: expected ';'
-  -- Example: /path/to/file.cpp:42: undefined reference
-  -- Example: file.h:42:10: warning: unused variable
-  M.register_pattern("c_cpp", {
-    pattern = "([^:%s]+%.c[pp]?[px]?[x]?):(%d+):",
-    file_pattern = "([^:%s]+%.c[pp]?[px]?[x]?):%d+:",
-    line_pattern = "%.c[pp]?[px]?[x]?:(%d+):",
-    column_pattern = "%.c[pp]?[px]?[x]?:%d+:(%d+):",
+  M.register_pattern("c_source", {
+    pattern = "([^:%s]+%.c):(%d+):",
+    file_pattern = "([^:%s]+%.c):%d+:",
+    line_pattern = "%.c:(%d+):",
+    column_pattern = "%.c:%d+:(%d+):",
     multiline = false,
     priority = 5,
   })
 
-  -- C/C++ header files
-  -- Example: /path/to/file.h:42:10: note: declared here
+  -- C++ source files (.cpp)
+  -- Example: /path/to/file.cpp:42: undefined reference
+  M.register_pattern("cpp_source", {
+    pattern = "([^:%s]+%.cpp):(%d+):",
+    file_pattern = "([^:%s]+%.cpp):%d+:",
+    line_pattern = "%.cpp:(%d+):",
+    column_pattern = "%.cpp:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C++ source files (.cc)
+  -- Example: /path/to/file.cc:42: error
+  M.register_pattern("cc_source", {
+    pattern = "([^:%s]+%.cc):(%d+):",
+    file_pattern = "([^:%s]+%.cc):%d+:",
+    line_pattern = "%.cc:(%d+):",
+    column_pattern = "%.cc:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C++ source files (.cxx)
+  -- Example: /path/to/file.cxx:42: error
+  M.register_pattern("cxx_source", {
+    pattern = "([^:%s]+%.cxx):(%d+):",
+    file_pattern = "([^:%s]+%.cxx):%d+:",
+    line_pattern = "%.cxx:(%d+):",
+    column_pattern = "%.cxx:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C header files (.h)
+  -- Example: file.h:42:10: warning: unused variable
+  M.register_pattern("h_header", {
+    pattern = "([^:%s]+%.h):(%d+):",
+    file_pattern = "([^:%s]+%.h):%d+:",
+    line_pattern = "%.h:(%d+):",
+    column_pattern = "%.h:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C++ header files (.hpp)
   -- Example: /path/to/file.hpp:42: error
-  M.register_pattern("c_cpp_header", {
-    pattern = "([^:%s]+%.h[pp]?[px]?[x]?):(%d+):",
-    file_pattern = "([^:%s]+%.h[pp]?[px]?[x]?):%d+:",
-    line_pattern = "%.h[pp]?[px]?[x]?:(%d+):",
-    column_pattern = "%.h[pp]?[px]?[x]?:%d+:(%d+):",
+  M.register_pattern("hpp_header", {
+    pattern = "([^:%s]+%.hpp):(%d+):",
+    file_pattern = "([^:%s]+%.hpp):%d+:",
+    line_pattern = "%.hpp:(%d+):",
+    column_pattern = "%.hpp:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C++ header files (.hh)
+  -- Example: /path/to/file.hh:42: error
+  M.register_pattern("hh_header", {
+    pattern = "([^:%s]+%.hh):(%d+):",
+    file_pattern = "([^:%s]+%.hh):%d+:",
+    line_pattern = "%.hh:(%d+):",
+    column_pattern = "%.hh:%d+:(%d+):",
+    multiline = false,
+    priority = 5,
+  })
+
+  -- C++ header files (.hxx)
+  -- Example: /path/to/file.hxx:42: error
+  M.register_pattern("hxx_header", {
+    pattern = "([^:%s]+%.hxx):(%d+):",
+    file_pattern = "([^:%s]+%.hxx):%d+:",
+    line_pattern = "%.hxx:(%d+):",
+    column_pattern = "%.hxx:%d+:(%d+):",
     multiline = false,
     priority = 5,
   })

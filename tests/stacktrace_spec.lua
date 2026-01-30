@@ -36,9 +36,16 @@ describe("termlet.stacktrace", function()
       assert.is_not_nil(patterns.rust)
       assert.is_not_nil(patterns.lua)
       assert.is_not_nil(patterns.ruby)
-      -- Newly added languages
-      assert.is_not_nil(patterns.c_cpp)
-      assert.is_not_nil(patterns.c_cpp_header)
+      -- C/C++ source and header patterns
+      assert.is_not_nil(patterns.c_source)
+      assert.is_not_nil(patterns.cpp_source)
+      assert.is_not_nil(patterns.cc_source)
+      assert.is_not_nil(patterns.cxx_source)
+      assert.is_not_nil(patterns.h_header)
+      assert.is_not_nil(patterns.hpp_header)
+      assert.is_not_nil(patterns.hh_header)
+      assert.is_not_nil(patterns.hxx_header)
+      -- Other languages
       assert.is_not_nil(patterns.php)
       assert.is_not_nil(patterns.perl)
       assert.is_not_nil(patterns.elixir)
@@ -246,7 +253,7 @@ describe("termlet.stacktrace", function()
     it("should extract C/C++ stack trace info", function()
       local line = "/home/user/project/main.cpp:42:15: error: expected ';'"
       local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.c_cpp, "/home/user/project")
+      local info = stacktrace.extract_file_info(line, patterns.cpp_source, "/home/user/project")
 
       assert.is_not_nil(info)
       assert.equals("/home/user/project/main.cpp", info.path)
@@ -256,7 +263,7 @@ describe("termlet.stacktrace", function()
     it("should extract C header file stack trace info", function()
       local line = "/home/user/project/utils.h:10:5: warning: unused variable"
       local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.c_cpp_header, "/home/user/project")
+      local info = stacktrace.extract_file_info(line, patterns.h_header, "/home/user/project")
 
       assert.is_not_nil(info)
       assert.equals("/home/user/project/utils.h", info.path)
@@ -356,7 +363,7 @@ describe("termlet.stacktrace", function()
       local result = stacktrace.process_line(line, "/home/user")
 
       assert.is_not_nil(result)
-      assert.equals("c_cpp", result.language)
+      assert.equals("cpp_source", result.language)
       assert.equals(42, result.line)
     end)
 
