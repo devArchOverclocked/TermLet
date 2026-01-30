@@ -139,12 +139,14 @@ local function format_keybinding_line(script, keybinding, is_selected, width)
   end
 
   -- Format action hint with fixed-width padding for alignment
-  local action
+  local action_width = 16 -- length of "[Change] [Clear]"
+  local action_text
   if keybinding and keybinding ~= "" then
-    action = "[Change] [Clear]"
+    action_text = "[Change] [Clear]"
   else
-    action = "[Set]            "
+    action_text = "[Set]"
   end
+  local action = string.format("%-" .. action_width .. "s", action_text)
 
   return prefix .. padded_name .. "  " .. padded_key .. "  " .. action
 end
@@ -248,13 +250,20 @@ local function render_ui()
     -- Normal mode - show keybinding list
     table.insert(lines, "")
 
-    -- Header
+    -- Header - use same column widths as data rows for alignment
     local name_width = math.floor(width * 0.35)
     local key_width = math.floor(width * 0.25)
-    local header = "    " .. "Script" .. string.rep(" ", name_width - 6) .. "  " .. "Keybinding" .. string.rep(" ", key_width - 10) .. "  " .. "Action"
+    local action_width = 16 -- matches "[Change] [Clear]" length
+    local header = "    "
+      .. string.format("%-" .. name_width .. "s", "Script")
+      .. "  "
+      .. string.format("%-" .. key_width .. "s", "Keybinding")
+      .. "  "
+      .. string.format("%-" .. action_width .. "s", "Action")
     table.insert(lines, header)
 
-    local separator = "    " .. string.rep("─", width - 8)
+    local content_width = name_width + 2 + key_width + 2 + action_width
+    local separator = "    " .. string.rep("─", content_width)
     table.insert(lines, separator)
     table.insert(highlights, { line = 1, group = state.config.highlight.title })
 
@@ -483,7 +492,17 @@ local function enter_capture_mode()
       if notation == "<CR>" then
         if #state.captured_keys > 0 then
           local keybinding_str = table.concat(state.captured_keys, "")
-          exit_capture()
+          -- Inline cleanup WITHOUT premature render_ui() call.
+          -- exit_capture() internally calls render_ui() which would render
+          -- the old state before the keybinding is applied, causing the UI
+          -- to flash back to "(waiting...)" and never show the new binding.
+          stop_capture_timer()
+          detach_on_key()
+          state.mode = "normal"
+          state.captured_keys = {}
+          state.input_text = ""
+          restore_footer()
+          -- Apply the keybinding THEN render (single render with updated data)
           apply_captured_keybinding(keybinding_str)
           render_ui()
         end
@@ -549,7 +568,16 @@ local function enter_input_mode()
       if notation == "<CR>" then
         if state.input_text ~= "" then
           local keybinding_str = state.input_text
-          exit_capture()
+          -- Inline cleanup WITHOUT premature render_ui() call.
+          -- Same fix as capture mode: exit_capture() would render the old
+          -- state before the keybinding is applied.
+          stop_capture_timer()
+          detach_on_key()
+          state.mode = "normal"
+          state.captured_keys = {}
+          state.input_text = ""
+          restore_footer()
+          -- Apply the keybinding THEN render (single render with updated data)
           apply_captured_keybinding(keybinding_str)
           render_ui()
         end
