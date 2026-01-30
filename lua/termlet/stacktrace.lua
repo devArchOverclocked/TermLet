@@ -95,6 +95,24 @@ local function is_language_enabled(language)
   return false
 end
 
+---Strip ANSI escape sequences and carriage returns from a string.
+---Terminal PTY output includes escape codes (e.g. \x1b[0m) that corrupt
+---Lua pattern matching. This function removes them before processing.
+---@param str string The string to clean
+---@return string The cleaned string
+function M.strip_ansi(str)
+  -- Remove ANSI CSI sequences: ESC [ ... final_byte
+  local cleaned = str:gsub("\27%[[%d;]*[A-Za-z]", "")
+  -- Remove OSC sequences: ESC ] ... ST (BEL or ESC \)
+  cleaned = cleaned:gsub("\27%][^\a\27]*[\a]", "")
+  cleaned = cleaned:gsub("\27%][^\a\27]*\27\\", "")
+  -- Remove other ESC sequences (two-character)
+  cleaned = cleaned:gsub("\27[%(%)][A-Za-z0-9]", "")
+  -- Remove carriage returns (PTY often sends \r\n)
+  cleaned = cleaned:gsub("\r", "")
+  return cleaned
+end
+
 ---Match a line against a pattern (handles both Lua patterns and regex-like patterns)
 ---@param line string The line to match
 ---@param pattern string The pattern to match against
@@ -294,11 +312,19 @@ function M.process_terminal_output(data, cwd, buffer_id)
   local line_offset = 0
 
   for _, line in ipairs(data) do
-    if line and line ~= "" then
-      add_to_buffer(line)
-      line_offset = line_offset + 1
+    -- Increment line_offset for every element in data, including empty strings,
+    -- because Neovim's on_stdout/on_stderr callbacks include empty strings as
+    -- line separators and each element corresponds to a line in the terminal buffer.
+    line_offset = line_offset + 1
 
-      local file_info = M.process_line(line, cwd)
+    if line and line ~= "" then
+      -- Strip ANSI escape sequences from PTY output before processing.
+      -- termopen() creates a pseudo-terminal, so on_stdout receives raw
+      -- terminal data including escape codes that corrupt pattern matching.
+      local cleaned_line = M.strip_ansi(line)
+      add_to_buffer(cleaned_line)
+
+      local file_info = M.process_line(cleaned_line, cwd)
       if file_info then
         local buffer_line = terminal_line_count + line_offset
         file_info.buffer_line = buffer_line
@@ -358,10 +384,10 @@ end
 ---Find file info near a cursor position in a buffer
 ---@param buffer_id number The buffer ID
 ---@param cursor_line number The cursor line position
----@param search_range number|nil Number of lines to search above/below (default 5)
+---@param search_range number|nil Number of lines to search above/below (default 10)
 ---@return table|nil The nearest file info or nil if not found
 function M.find_nearest_metadata(buffer_id, cursor_line, search_range)
-  search_range = search_range or 5
+  search_range = search_range or 10
   local metadata = buffer_metadata[buffer_id]
 
   if not metadata then
@@ -384,6 +410,39 @@ function M.find_nearest_metadata(buffer_id, cursor_line, search_range)
   end
 
   return nil
+end
+
+---Scan a terminal buffer's rendered content for stack trace references.
+---This should be called after the process exits, because Neovim strips ANSI
+---escape codes from terminal buffer lines read via nvim_buf_get_lines().
+---This provides the most reliable detection since it operates on clean text
+---with accurate 1-indexed line numbers that match cursor positions exactly.
+---@param buffer_id number The terminal buffer ID
+---@param cwd string The working directory for resolving paths
+---@return table[] Array of detected file references
+function M.scan_buffer_for_stacktraces(buffer_id, cwd)
+  if not config.enabled then
+    return {}
+  end
+  if not buffer_id or not vim.api.nvim_buf_is_valid(buffer_id) then
+    return {}
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(buffer_id, 0, -1, false)
+  local results = {}
+
+  for i, line in ipairs(lines) do
+    if line and line ~= "" then
+      local file_info = M.process_line(line, cwd)
+      if file_info then
+        file_info.buffer_line = i
+        table.insert(results, file_info)
+        M.store_metadata(buffer_id, i, file_info)
+      end
+    end
+  end
+
+  return results
 end
 
 ---Configure the stacktrace module
@@ -488,8 +547,8 @@ function M.register_builtin_patterns()
   -- Example: (my_app 0.1.0) lib/my_app/worker.ex:42: MyApp.Worker.run/1
   -- Example: lib/my_app.ex:42: (module)
   M.register_pattern("elixir", {
-    pattern = "([^:]+%.exs?):(%d+):",
-    file_pattern = "([^:]+%.exs?):%d+:",
+    pattern = "([^:%s]+%.exs?):(%d+):",
+    file_pattern = "([^:%s]+%.exs?):%d+:",
     line_pattern = "%.exs?:(%d+):",
     multiline = false,
     priority = 7,
@@ -509,8 +568,8 @@ function M.register_builtin_patterns()
   -- Example: /path/to/file.swift:42: error: something went wrong
   -- Example: /path/to/file.swift:42:15: error: description
   M.register_pattern("swift", {
-    pattern = "([^:]+%.swift):(%d+):",
-    file_pattern = "([^:]+%.swift):%d+:",
+    pattern = "([^:%s]+%.swift):(%d+):",
+    file_pattern = "([^:%s]+%.swift):%d+:",
     line_pattern = "%.swift:(%d+):",
     column_pattern = "%.swift:%d+:(%d+):",
     multiline = false,
@@ -533,8 +592,8 @@ function M.register_builtin_patterns()
   -- Example: /path/to/file.hs:42:15: error:
   -- Example: CallStack (from HasCallStack):  module, called at src/Module.hs:42:15
   M.register_pattern("haskell", {
-    pattern = "([^:]+%.hs):(%d+):",
-    file_pattern = "([^:]+%.hs):%d+:",
+    pattern = "([^:%s]+%.hs):(%d+):",
+    file_pattern = "([^:%s]+%.hs):%d+:",
     line_pattern = "%.hs:(%d+):",
     column_pattern = "%.hs:%d+:(%d+):",
     multiline = false,

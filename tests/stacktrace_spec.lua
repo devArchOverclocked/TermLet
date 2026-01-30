@@ -177,7 +177,7 @@ describe("termlet.stacktrace", function()
       local info = stacktrace.extract_file_info(line, patterns.elixir, "/home/user/project")
 
       assert.is_not_nil(info)
-      assert.truthy(info.original_path:find("worker%.ex"))
+      assert.equals("lib/my_app/worker.ex", info.original_path)
       assert.equals(42, info.line)
     end)
 
@@ -743,6 +743,284 @@ describe("termlet.stacktrace", function()
       assert.is_true(cfg.enabled)
       assert.equals(100, cfg.buffer_size)
       assert.equals(2, #cfg.languages)
+    end)
+  end)
+
+  describe("strip_ansi", function()
+    before_each(function()
+      stacktrace.setup({})
+    end)
+
+    it("should strip basic CSI escape sequences", function()
+      local input = "\27[0m  File \"/home/user/test.py\", line 7, in <module>\27[0m"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals('  File "/home/user/test.py", line 7, in <module>', result)
+    end)
+
+    it("should strip color codes", function()
+      local input = "\27[31merror\27[0m: something failed at \27[1m/path/file.py\27[0m:42"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals("error: something failed at /path/file.py:42", result)
+    end)
+
+    it("should strip multi-parameter CSI sequences", function()
+      local input = "\27[1;31;40mBold red text\27[0m"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals("Bold red text", result)
+    end)
+
+    it("should remove carriage returns", function()
+      local input = "File \"/home/user/test.py\", line 7\r"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals('File "/home/user/test.py", line 7', result)
+    end)
+
+    it("should return clean string unchanged", function()
+      local input = 'File "/home/user/test.py", line 7, in main'
+      local result = stacktrace.strip_ansi(input)
+      assert.equals(input, result)
+    end)
+
+    it("should handle empty string", function()
+      assert.equals("", stacktrace.strip_ansi(""))
+    end)
+
+    it("should handle cursor movement sequences", function()
+      local input = "\27[2A\27[3B/path/to/file.py:42: error"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals("/path/to/file.py:42: error", result)
+    end)
+  end)
+
+  describe("process_terminal_output with ANSI codes", function()
+    before_each(function()
+      stacktrace.setup({})
+    end)
+
+    it("should detect Python stack trace through ANSI escape codes", function()
+      -- Simulate PTY output with ANSI escape codes wrapping the line
+      local data = {
+        '\27[0m  File "/home/user/test.py", line 10, in main\27[0m\r',
+      }
+
+      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
+
+      assert.equals(1, #results)
+      assert.equals("python", results[1].language)
+      assert.equals("/home/user/test.py", results[1].path)
+      assert.equals(10, results[1].line)
+    end)
+
+    it("should detect C++ compiler error through ANSI color codes", function()
+      local data = {
+        "\27[1m/home/user/main.cpp:42:15:\27[0m \27[31merror:\27[0m expected ';'",
+      }
+
+      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
+
+      assert.equals(1, #results)
+      assert.equals("cpp_source", results[1].language)
+      assert.equals(42, results[1].line)
+    end)
+
+    it("should detect JavaScript error through ANSI codes", function()
+      local data = {
+        "\27[90m    at myFunction (/home/user/index.js:25:10)\27[0m",
+      }
+
+      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
+
+      assert.equals(1, #results)
+      assert.equals("javascript", results[1].language)
+      assert.equals(25, results[1].line)
+    end)
+
+    it("should store ANSI-cleaned metadata with correct line numbers", function()
+      local data = {
+        "\27[0mTraceback:\27[0m",
+        "",
+        '\27[0m  File "/home/user/test.py", line 10, in main\27[0m\r',
+        "",
+      }
+
+      stacktrace.process_terminal_output(data, "/home/user", 500)
+      local metadata = stacktrace.get_buffer_metadata(500)
+
+      -- The stack trace is at data index 3
+      assert.is_not_nil(metadata[3])
+      assert.equals("/home/user/test.py", metadata[3].path)
+      assert.equals(10, metadata[3].line)
+    end)
+  end)
+
+  describe("scan_buffer_for_stacktraces", function()
+    before_each(function()
+      stacktrace.setup({})
+    end)
+
+    it("should scan buffer lines and store metadata", function()
+      -- Create a buffer with stack trace content
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+        "Traceback (most recent call last):",
+        '  File "/home/user/test.py", line 10, in main',
+        "    do_stuff()",
+        '  File "/home/user/utils.py", line 42, in do_stuff',
+        "    raise RuntimeError('error')",
+        "RuntimeError: error",
+      })
+
+      local results = stacktrace.scan_buffer_for_stacktraces(buf, "/home/user")
+
+      assert.equals(2, #results)
+      assert.equals("/home/user/test.py", results[1].path)
+      assert.equals(10, results[1].line)
+      assert.equals(2, results[1].buffer_line)
+      assert.equals("/home/user/utils.py", results[2].path)
+      assert.equals(42, results[2].line)
+      assert.equals(4, results[2].buffer_line)
+
+      -- Verify metadata is stored at correct buffer line numbers
+      local meta2 = stacktrace.get_metadata(buf, 2)
+      assert.is_not_nil(meta2)
+      assert.equals("/home/user/test.py", meta2.path)
+
+      local meta4 = stacktrace.get_metadata(buf, 4)
+      assert.is_not_nil(meta4)
+      assert.equals("/home/user/utils.py", meta4.path)
+
+      -- Clean up
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should return empty when disabled", function()
+      stacktrace.disable()
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+        'File "/home/user/test.py", line 10, in main',
+      })
+
+      local results = stacktrace.scan_buffer_for_stacktraces(buf, "/home/user")
+      assert.equals(0, #results)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should return empty for invalid buffer", function()
+      local results = stacktrace.scan_buffer_for_stacktraces(99999, "/home/user")
+      assert.equals(0, #results)
+    end)
+
+    it("should return empty for nil buffer", function()
+      local results = stacktrace.scan_buffer_for_stacktraces(nil, "/home/user")
+      assert.equals(0, #results)
+    end)
+
+    it("should detect multiple languages in a single buffer", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+        '  File "/home/user/app.py", line 5, in main',
+        "    at myFunc (/home/user/index.js:25:10)",
+        "/home/user/main.cpp:42:15: error: expected ';'",
+      })
+
+      local results = stacktrace.scan_buffer_for_stacktraces(buf, "/home/user")
+
+      assert.equals(3, #results)
+      assert.equals("python", results[1].language)
+      assert.equals("javascript", results[2].language)
+      assert.equals("cpp_source", results[3].language)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+  end)
+
+  describe("Elixir/Haskell/Swift pattern whitespace handling", function()
+    before_each(function()
+      stacktrace.setup({})
+    end)
+
+    it("should not capture leading whitespace in Elixir paths", function()
+      local line = "    lib/my_app/worker.ex:42: MyApp.Worker.run/1"
+      local result = stacktrace.process_line(line, "/home/user")
+
+      assert.is_not_nil(result)
+      assert.equals("elixir", result.language)
+      assert.equals("lib/my_app/worker.ex", result.original_path)
+      assert.equals(42, result.line)
+    end)
+
+    it("should not capture leading whitespace in Swift paths", function()
+      local line = "    /home/user/main.swift:42:15: error: something"
+      local result = stacktrace.process_line(line, "/home/user")
+
+      assert.is_not_nil(result)
+      assert.equals("swift", result.language)
+      assert.equals("/home/user/main.swift", result.original_path)
+      assert.equals(42, result.line)
+    end)
+
+    it("should not capture leading whitespace in Haskell paths", function()
+      local line = "    /home/user/Main.hs:42:15: error:"
+      local result = stacktrace.process_line(line, "/home/user")
+
+      assert.is_not_nil(result)
+      assert.equals("haskell", result.language)
+      assert.equals("/home/user/Main.hs", result.original_path)
+      assert.equals(42, result.line)
+    end)
+
+    it("should still match Elixir paths without leading whitespace", function()
+      local line = "lib/my_app/worker.exs:42: MyApp.Worker.run/1"
+      local result = stacktrace.process_line(line, "/home/user")
+
+      assert.is_not_nil(result)
+      assert.equals("elixir", result.language)
+      assert.equals("lib/my_app/worker.exs", result.original_path)
+    end)
+  end)
+
+  describe("find_nearest_metadata with expanded range", function()
+    before_each(function()
+      stacktrace.store_metadata(1, 5, { path = "file1.py", line = 10 })
+      stacktrace.store_metadata(1, 20, { path = "file2.py", line = 20 })
+    end)
+
+    it("should find metadata within default range of 10", function()
+      -- Metadata at line 5, cursor at line 14 -> distance of 9, within range 10
+      -- Metadata at line 20, cursor at line 14 -> distance of 6, closer
+      -- Nearest metadata (file2 at distance 6) should be returned
+      local result = stacktrace.find_nearest_metadata(1, 14)
+      assert.is_not_nil(result)
+      assert.equals("file2.py", result.path)
+    end)
+
+    it("should find metadata at edge of default range", function()
+      -- Metadata at line 5, cursor at line 15 -> distance of 10, at edge of range 10
+      -- Metadata at line 20, cursor at line 15 -> distance of 5, closer
+      local result = stacktrace.find_nearest_metadata(1, 15)
+      assert.is_not_nil(result)
+      assert.equals("file2.py", result.path)
+    end)
+
+    it("should not find metadata outside default range of 10", function()
+      -- Metadata at line 5, cursor at line 40 -> distance of 35, outside range 10
+      -- Metadata at line 20, cursor at line 40 -> distance of 20, outside range 10
+      local result = stacktrace.find_nearest_metadata(1, 40)
+      assert.is_nil(result)
+    end)
+
+    it("should respect custom range when specified", function()
+      -- With a range of 3, cursor at line 8 should find metadata at line 5 (distance 3)
+      local result = stacktrace.find_nearest_metadata(1, 8, 3)
+      assert.is_not_nil(result)
+      assert.equals("file1.py", result.path)
+    end)
+
+    it("should return nil when metadata is outside custom range", function()
+      -- With a range of 2, cursor at line 8 should NOT find metadata at line 5 (distance 3)
+      local result = stacktrace.find_nearest_metadata(1, 8, 2)
+      assert.is_nil(result)
     end)
   end)
 

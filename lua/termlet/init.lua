@@ -399,7 +399,10 @@ local function execute_script(script)
 
   debug_log("Executing: " .. cmd .. " in " .. cwd)
 
-  -- Run the command in the terminal
+  -- Run the command in the terminal.
+  -- Note: termopen() creates a pseudo-terminal (PTY), which merges stdout and
+  -- stderr into a single stream. on_stderr is never called with termopen().
+  -- All output (including stderr) arrives through on_stdout.
   local job_id = vim.fn.termopen(cmd, {
     cwd = cwd,
     on_exit = function(_, code)
@@ -408,26 +411,25 @@ local function execute_script(script)
       vim.schedule(function()
         vim.notify(msg, level)
         update_terminal_status(win, code)
+        -- After process exits, scan the terminal buffer for stack traces.
+        -- This is the most reliable detection method because Neovim strips
+        -- ANSI escape codes from terminal buffer content read via the API,
+        -- and line numbers are accurate 1-indexed values matching cursor positions.
+        if config.stacktrace.enabled and buf and vim.api.nvim_buf_is_valid(buf) then
+          stacktrace.clear_metadata(buf)
+          stacktrace.scan_buffer_for_stacktraces(buf, cwd)
+        end
       end)
     end,
     on_stdout = function(_, data)
-      -- Process stdout for stack trace detection
+      -- Process stdout for real-time stack trace detection.
+      -- ANSI escape codes are stripped before pattern matching.
       if config.stacktrace.enabled then
         stacktrace.process_terminal_output(data, cwd, buf)
       end
       -- Call user-defined callback if provided
       if script.on_stdout then
         script.on_stdout(data)
-      end
-    end,
-    on_stderr = function(_, data)
-      -- Process stderr for stack trace detection (stack traces often appear in stderr)
-      if config.stacktrace.enabled then
-        stacktrace.process_terminal_output(data, cwd, buf)
-      end
-      -- Call user-defined callback if provided
-      if script.on_stderr then
-        script.on_stderr(data)
       end
     end,
   })
