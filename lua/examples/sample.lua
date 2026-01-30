@@ -20,6 +20,25 @@ return {
 					filename = "test",
 				},
 			},
+			terminal = {
+				position = "bottom",
+				height_ratio = 0.2,
+				border = "rounded", -- or custom: { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
+				highlights = {
+					border = "FloatBorder",
+					title = "Title",
+					background = "NormalFloat",
+				},
+				title_format = " {icon} {name} {status} ",
+				title_icon = "",
+				title_pos = "center", -- "left", "center", "right"
+				show_status = true,
+				status_icons = {
+					running = "●",
+					success = "✓",
+					error = "✗",
+				},
+			},
 		},
 		keys = {
 			{

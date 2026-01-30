@@ -10,8 +10,22 @@ local config = {
   terminal = {
     height_ratio = 0.16, -- 1/6 of screen height
     width_ratio = 1.0,   -- full width
-    border = "rounded",
+    border = "rounded",  -- string preset or table of 8 border characters
     position = "bottom", -- "bottom", "center", "top"
+    highlights = {
+      border = "FloatBorder",
+      title = "Title",
+      background = "NormalFloat",
+    },
+    title_format = " {icon} {name} ",
+    title_icon = "",
+    title_pos = "center", -- "left", "center", "right"
+    show_status = false,
+    status_icons = {
+      running = "●",
+      success = "✓",
+      error = "✗",
+    },
   },
   menu = {
     width_ratio = 0.6,
@@ -24,6 +38,39 @@ local config = {
 
 -- Store active terminal windows for cleanup
 local active_terminals = {}
+
+-- Literal string replacement to avoid Lua pattern issues with special chars
+local function replace_placeholder(str, placeholder, replacement)
+  local start, finish = str:find(placeholder, 1, true)
+  if not start then
+    return str
+  end
+  return str:sub(1, start - 1) .. replacement .. str:sub(finish + 1)
+end
+
+-- Format terminal title using config placeholders
+local function format_terminal_title(term_config, name, status)
+  local title = term_config.title_format or " {icon} {name} "
+
+  local icon = term_config.title_icon or ""
+  title = replace_placeholder(title, "{icon}", icon)
+  title = replace_placeholder(title, "{name}", name or "Terminal")
+
+  local status_text = ""
+  if term_config.show_status and status then
+    local icons = term_config.status_icons or {}
+    status_text = icons[status] or ""
+  end
+  title = replace_placeholder(title, "{status}", status_text)
+
+  -- Trim trailing whitespace when status placeholder was empty
+  title = title:gsub("%s+$", " ")
+
+  return title
+end
+
+-- Expose for testing
+M._format_terminal_title = format_terminal_title
 
 -- Utility function for debug logging
 local function debug_log(msg)
@@ -61,6 +108,11 @@ function M.create_floating_terminal(opts)
     return nil
   end
   
+  -- Build formatted title
+  local name = opts.title or "Terminal"
+  local initial_status = term_config.show_status and "running" or nil
+  local title = format_terminal_title(term_config, name, initial_status)
+
   local win_opts = {
     relative = "editor",
     width = width,
@@ -70,24 +122,38 @@ function M.create_floating_terminal(opts)
     anchor = "NW",
     style = "minimal",
     border = term_config.border,
-    title = opts.title or "Terminal",
-    title_pos = "center",
+    title = title,
+    title_pos = term_config.title_pos or "center",
   }
-  
+
   local win = vim.api.nvim_open_win(buf, true, win_opts)
   if not win then
     vim.api.nvim_buf_delete(buf, { force = true })
     vim.notify("Failed to create terminal window", vim.log.levels.ERROR)
     return nil
   end
-  
+
+  -- Apply highlight groups
+  local highlights = term_config.highlights
+  if highlights then
+    vim.api.nvim_set_option_value("winhighlight",
+      "Normal:" .. (highlights.background or "NormalFloat") ..
+      ",FloatBorder:" .. (highlights.border or "FloatBorder") ..
+      ",FloatTitle:" .. (highlights.title or "Title"),
+      { win = win })
+  end
+
   -- Set buffer options
-  vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
-  vim.api.nvim_buf_set_option(buf, "filetype", "terminal")
-  vim.api.nvim_buf_set_option(buf, "buflisted", false)
-  -- Store reference for cleanup
-  active_terminals[win] = buf
-  
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "terminal", { buf = buf })
+  vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
+  -- Store reference for cleanup (table for status title updates)
+  active_terminals[win] = {
+    buf = buf,
+    name = name,
+    term_config = term_config,
+  }
+
   -- Auto-cleanup on window close
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(win),
@@ -96,7 +162,7 @@ function M.create_floating_terminal(opts)
     end,
     once = true,
   })
-  
+
   return buf, win
 end
 
@@ -279,6 +345,15 @@ local function execute_script(script)
       local level = code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR
       vim.schedule(function()
         vim.notify(msg, level)
+        -- Update title with exit status indicator
+        local term_data = active_terminals[win]
+        if term_data and term_data.term_config.show_status
+            and vim.api.nvim_win_is_valid(win) then
+          local status = code == 0 and "success" or "error"
+          local new_title = format_terminal_title(
+            term_data.term_config, term_data.name, status)
+          vim.api.nvim_win_set_config(win, { title = new_title })
+        end
       end)
     end,
     on_stdout = function(_, data)
@@ -363,7 +438,7 @@ end
 
 -- Utility function to close all active terminals
 function M.close_all_terminals()
-  for win, buf in pairs(active_terminals) do
+  for win, _ in pairs(active_terminals) do
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
