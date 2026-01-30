@@ -509,10 +509,32 @@ describe("termlet.stacktrace", function()
       local metadata = stacktrace.get_buffer_metadata(456)
 
       -- Both lines are non-empty, so line_offset increments for each.
-      -- The stack trace is the 2nd non-empty line -> key = 0 + 2 = 2
+      -- The stack trace is the 2nd line -> key = 0 + 2 = 2
       assert.is_nil(metadata[1]) -- First line is not a stack trace
       assert.is_not_nil(metadata[2])
       assert.equals("/home/user/test.py", metadata[2].path)
+    end)
+
+    it("should count empty strings in line offset for accurate terminal mapping", function()
+      -- Neovim's on_stdout/on_stderr includes empty strings as line separators.
+      -- Each element corresponds to a terminal buffer line, so empty strings must
+      -- be counted in the line offset.
+      local data = {
+        "error line",
+        "",
+        'File "/home/user/test.py", line 10, in main',
+        "",
+      }
+
+      stacktrace.process_terminal_output(data, "/home/user", 789)
+      local metadata = stacktrace.get_buffer_metadata(789)
+
+      -- The stack trace is at index 3 in data (including empty strings).
+      -- line_offset = 3 at that point, so metadata key = 0 + 3 = 3
+      assert.is_nil(metadata[1]) -- "error line" is not a stack trace
+      assert.is_nil(metadata[2]) -- empty string
+      assert.is_not_nil(metadata[3])
+      assert.equals("/home/user/test.py", metadata[3].path)
     end)
   end)
 
@@ -766,6 +788,53 @@ describe("termlet.stacktrace", function()
     it("should have get_stacktrace_at_cursor function", function()
       termlet.setup({ scripts = {} })
       assert.is_function(termlet.get_stacktrace_at_cursor)
+    end)
+
+    it("should close floating window when goto_stacktrace navigates to a file", function()
+      termlet.setup({ scripts = {} })
+
+      -- Create a temporary file to navigate to
+      local tmpfile = vim.fn.tempname() .. ".py"
+      local f = io.open(tmpfile, "w")
+      f:write("# test file\nprint('hello')\n")
+      f:close()
+
+      -- Create a floating window (simulates the terminal float)
+      local buf = vim.api.nvim_create_buf(false, true)
+      local float_win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = 40,
+        height = 10,
+        row = 5,
+        col = 5,
+        style = "minimal",
+        border = "rounded",
+      })
+
+      -- Verify we're in a floating window
+      local win_cfg = vim.api.nvim_win_get_config(float_win)
+      assert.equals("editor", win_cfg.relative)
+
+      -- Store metadata for the buffer at cursor line 1
+      local st = require("termlet.stacktrace")
+      st.store_metadata(buf, 1, {
+        path = tmpfile,
+        original_path = tmpfile,
+        line = 2,
+        column = 1,
+      })
+
+      -- Set cursor to line 1 (where metadata is)
+      vim.api.nvim_win_set_cursor(float_win, { 1, 0 })
+
+      -- Call goto_stacktrace — this should close the floating window
+      termlet.goto_stacktrace()
+
+      -- The floating window should have been closed
+      assert.is_false(vim.api.nvim_win_is_valid(float_win))
+
+      -- Clean up temporary file
+      os.remove(tmpfile)
     end)
   end)
 end)
