@@ -555,4 +555,391 @@ describe("termlet", function()
       assert.is_not_nil(termlet)
     end)
   end)
+
+  describe("replace_placeholder multiple occurrences", function()
+    it("should replace all occurrences of the same placeholder", function()
+      local cfg = {
+        title_format = "{name} - {name}",
+        title_icon = "",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "build", nil)
+      -- Both {name} placeholders should be replaced
+      assert.are.equal("build - build", result)
+    end)
+
+    it("should replace multiple {icon} occurrences", function()
+      local cfg = {
+        title_format = "{icon} {name} {icon}",
+        title_icon = "X",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "test", nil)
+      assert.is_truthy(result:find("X test X", 1, true))
+    end)
+
+    it("should replace multiple {status} occurrences", function()
+      local cfg = {
+        title_format = "{status} {name} {status}",
+        title_icon = "",
+        show_status = true,
+        status_icons = { running = "R" },
+      }
+      local result = termlet._format_terminal_title(cfg, "build", "running")
+      -- Both {status} should become "R"
+      local _, count = result:gsub("R", "")
+      assert.are.equal(2, count)
+    end)
+  end)
+
+  describe("update_terminal_status", function()
+    it("should update title with success status on exit code 0", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          show_status = true,
+          title_format = " {name} {status} ",
+          status_icons = { running = "●", success = "✓", error = "✗" },
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      assert.is_not_nil(win)
+
+      local updated = termlet._update_terminal_status(win, 0)
+      assert.is_true(updated)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      local title_text = ""
+      if type(win_config.title) == "string" then
+        title_text = win_config.title
+      elseif type(win_config.title) == "table" then
+        for _, part in ipairs(win_config.title) do
+          if type(part) == "table" then
+            title_text = title_text .. (part[1] or "")
+          elseif type(part) == "string" then
+            title_text = title_text .. part
+          end
+        end
+      end
+      assert.is_truthy(title_text:find("✓", 1, true))
+    end)
+
+    it("should update title with error status on non-zero exit code", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          show_status = true,
+          title_format = " {name} {status} ",
+          status_icons = { running = "●", success = "✓", error = "✗" },
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      assert.is_not_nil(win)
+
+      local updated = termlet._update_terminal_status(win, 1)
+      assert.is_true(updated)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      local title_text = ""
+      if type(win_config.title) == "string" then
+        title_text = win_config.title
+      elseif type(win_config.title) == "table" then
+        for _, part in ipairs(win_config.title) do
+          if type(part) == "table" then
+            title_text = title_text .. (part[1] or "")
+          elseif type(part) == "string" then
+            title_text = title_text .. part
+          end
+        end
+      end
+      assert.is_truthy(title_text:find("✗", 1, true))
+    end)
+
+    it("should return false when show_status is disabled", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          show_status = false,
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      assert.is_not_nil(win)
+
+      local updated = termlet._update_terminal_status(win, 0)
+      assert.is_false(updated)
+    end)
+
+    it("should return false for invalid window", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { show_status = true },
+      })
+      -- Use a window ID that doesn't exist
+      local updated = termlet._update_terminal_status(99999, 0)
+      assert.is_false(updated)
+    end)
+  end)
+
+  describe("title_pos validation", function()
+    it("should fall back to center for invalid title_pos", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { title_pos = "middle" },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(win)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      assert.are.equal("center", win_config.title_pos)
+    end)
+
+    it("should accept valid title_pos values", function()
+      for _, pos in ipairs({ "left", "center", "right" }) do
+        termlet.setup({
+          scripts = {},
+          terminal = { title_pos = pos },
+        })
+        local buf, win = termlet.create_floating_terminal({})
+        assert.is_not_nil(win)
+
+        local win_config = vim.api.nvim_win_get_config(win)
+        assert.are.equal(pos, win_config.title_pos)
+      end
+    end)
+  end)
+
+  describe("border table validation", function()
+    it("should fall back to rounded for border table with wrong length", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          border = { "╭", "─", "╮", "│", "╯" }, -- only 5 elements
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(win)
+      -- Should not error — falls back to "rounded"
+    end)
+
+    it("should accept border table with exactly 8 elements", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          border = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(win)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      assert.is_table(win_config.border)
+    end)
+  end)
+
+  describe("should_exclude_dir", function()
+    it("should exclude hidden directories when exclude_hidden is true", function()
+      termlet.setup({ scripts = {} })
+      local search_config = { exclude_hidden = true, exclude_dirs = {} }
+      assert.is_true(termlet._should_exclude_dir(".git", search_config))
+      assert.is_true(termlet._should_exclude_dir(".cache", search_config))
+      assert.is_true(termlet._should_exclude_dir(".hidden", search_config))
+    end)
+
+    it("should not exclude hidden directories when exclude_hidden is false", function()
+      termlet.setup({ scripts = {} })
+      local search_config = { exclude_hidden = false, exclude_dirs = {} }
+      assert.is_false(termlet._should_exclude_dir(".git", search_config))
+      assert.is_false(termlet._should_exclude_dir(".cache", search_config))
+    end)
+
+    it("should exclude directories in exclude_dirs list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_hidden = false,
+        exclude_dirs = { "node_modules", "dist", "build" },
+      }
+      assert.is_true(termlet._should_exclude_dir("node_modules", search_config))
+      assert.is_true(termlet._should_exclude_dir("dist", search_config))
+      assert.is_true(termlet._should_exclude_dir("build", search_config))
+    end)
+
+    it("should not exclude directories not in the list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_hidden = false,
+        exclude_dirs = { "node_modules" },
+      }
+      assert.is_false(termlet._should_exclude_dir("src", search_config))
+      assert.is_false(termlet._should_exclude_dir("scripts", search_config))
+      assert.is_false(termlet._should_exclude_dir("lib", search_config))
+    end)
+
+    it("should handle empty exclude_dirs list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = { exclude_hidden = false, exclude_dirs = {} }
+      assert.is_false(termlet._should_exclude_dir("node_modules", search_config))
+      assert.is_false(termlet._should_exclude_dir("anything", search_config))
+    end)
+
+    it("should combine hidden and explicit exclusions", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_hidden = true,
+        exclude_dirs = { "node_modules", "vendor" },
+      }
+      -- Hidden dir excluded by exclude_hidden
+      assert.is_true(termlet._should_exclude_dir(".secret", search_config))
+      -- Explicit dir excluded by list
+      assert.is_true(termlet._should_exclude_dir("node_modules", search_config))
+      assert.is_true(termlet._should_exclude_dir("vendor", search_config))
+      -- Not excluded
+      assert.is_false(termlet._should_exclude_dir("src", search_config))
+    end)
+
+    it("should use default config when search_config is nil", function()
+      termlet.setup({ scripts = {} })
+      -- Uses defaults: exclude_hidden=true and the default exclude_dirs list
+      assert.is_true(termlet._should_exclude_dir(".git", nil))
+      assert.is_true(termlet._should_exclude_dir("node_modules", nil))
+      assert.is_false(termlet._should_exclude_dir("src", nil))
+    end)
+
+    it("should exclude all default directories", function()
+      termlet.setup({ scripts = {} })
+      local defaults = {
+        "node_modules", ".git", ".svn", ".hg", "dist", "build",
+        "target", "__pycache__", ".cache", ".tox", ".mypy_cache",
+        ".pytest_cache", "vendor", "venv", ".venv", "env",
+      }
+      for _, dir in ipairs(defaults) do
+        assert.is_true(termlet._should_exclude_dir(dir, nil),
+          "Expected '" .. dir .. "' to be excluded by defaults")
+      end
+    end)
+  end)
+
+  describe("should_exclude_file", function()
+    it("should exclude files matching glob patterns", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.min.*" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("app.min.js", search_config))
+      assert.is_true(termlet._should_exclude_file("styles.min.css", search_config))
+    end)
+
+    it("should not exclude files that do not match patterns", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.min.*" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_false(termlet._should_exclude_file("app.js", search_config))
+      assert.is_false(termlet._should_exclude_file("build.sh", search_config))
+    end)
+
+    it("should handle multiple patterns", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.min.*", "*.bundle.*", "*.bak" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("app.min.js", search_config))
+      assert.is_true(termlet._should_exclude_file("vendor.bundle.js", search_config))
+      assert.is_true(termlet._should_exclude_file("data.bak", search_config))
+      assert.is_false(termlet._should_exclude_file("main.lua", search_config))
+    end)
+
+    it("should handle empty patterns list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = {},
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_false(termlet._should_exclude_file("anything.js", search_config))
+    end)
+
+    it("should support ? wildcard for single character", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "test?.lua" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("test1.lua", search_config))
+      assert.is_true(termlet._should_exclude_file("testA.lua", search_config))
+      assert.is_false(termlet._should_exclude_file("test12.lua", search_config))
+      assert.is_false(termlet._should_exclude_file("test.lua", search_config))
+    end)
+
+    it("should use default config when search_config is nil", function()
+      -- Default has empty exclude_patterns, so nothing should be excluded
+      termlet.setup({ scripts = {} })
+      assert.is_false(termlet._should_exclude_file("anything.js", nil))
+    end)
+  end)
+
+  describe("search configuration", function()
+    it("should accept custom search config in setup", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "custom_dir", "another_dir" },
+          exclude_hidden = false,
+          exclude_patterns = { "*.tmp" },
+        },
+      })
+      -- Should not error
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should merge search config with defaults", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_hidden = false,
+        },
+      })
+      -- After deep merge, exclude_hidden should be false
+      -- but exclude_dirs should still have defaults
+      assert.is_not_nil(termlet)
+      -- Verify by testing the function with nil (uses internal config)
+      -- exclude_hidden was set to false, so hidden dirs are NOT excluded
+      assert.is_false(termlet._should_exclude_dir(".hidden_dir", nil))
+      -- But explicit dirs from default list should still be excluded
+      assert.is_true(termlet._should_exclude_dir("node_modules", nil))
+    end)
+
+    it("should allow replacing exclude_dirs entirely", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "only_this" },
+        },
+      })
+      assert.is_true(termlet._should_exclude_dir("only_this", nil))
+      -- Default dirs like node_modules should no longer be excluded
+      -- because tbl_deep_extend replaces the list
+      assert.is_false(termlet._should_exclude_dir("node_modules", nil))
+    end)
+
+    it("should allow adding exclude_patterns", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_patterns = { "*.min.*", "*.bundle.*" },
+        },
+      })
+      assert.is_true(termlet._should_exclude_file("app.min.js", nil))
+      assert.is_true(termlet._should_exclude_file("vendor.bundle.js", nil))
+      assert.is_false(termlet._should_exclude_file("app.js", nil))
+    end)
+  end)
 end)

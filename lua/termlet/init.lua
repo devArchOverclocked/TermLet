@@ -27,6 +27,28 @@ local config = {
       error = "✗",
     },
   },
+  search = {
+    exclude_dirs = {
+      "node_modules",
+      ".git",
+      ".svn",
+      ".hg",
+      "dist",
+      "build",
+      "target",
+      "__pycache__",
+      ".cache",
+      ".tox",
+      ".mypy_cache",
+      ".pytest_cache",
+      "vendor",
+      "venv",
+      ".venv",
+      "env",
+    },
+    exclude_hidden = true,
+    exclude_patterns = {},
+  },
   menu = {
     width_ratio = 0.6,
     height_ratio = 0.5,
@@ -40,12 +62,19 @@ local config = {
 local active_terminals = {}
 
 -- Literal string replacement to avoid Lua pattern issues with special chars
+-- Replaces ALL occurrences of placeholder in str
 local function replace_placeholder(str, placeholder, replacement)
-  local start, finish = str:find(placeholder, 1, true)
-  if not start then
-    return str
+  local result = str
+  local search_start = 1
+  while true do
+    local start, finish = result:find(placeholder, search_start, true)
+    if not start then
+      break
+    end
+    result = result:sub(1, start - 1) .. replacement .. result:sub(finish + 1)
+    search_start = start + #replacement
   end
-  return str:sub(1, start - 1) .. replacement .. str:sub(finish + 1)
+  return result
 end
 
 -- Format terminal title using config placeholders
@@ -69,8 +98,28 @@ local function format_terminal_title(term_config, name, status)
   return title
 end
 
+-- Update terminal title with exit status (extracted for testability)
+local function update_terminal_status(win, exit_code)
+  local term_data = active_terminals[win]
+  if not term_data then
+    return false
+  end
+  if not term_data.term_config.show_status then
+    return false
+  end
+  if not vim.api.nvim_win_is_valid(win) then
+    return false
+  end
+  local status = exit_code == 0 and "success" or "error"
+  local new_title = format_terminal_title(
+    term_data.term_config, term_data.name, status)
+  vim.api.nvim_win_set_config(win, { title = new_title })
+  return true
+end
+
 -- Expose for testing
 M._format_terminal_title = format_terminal_title
+M._update_terminal_status = update_terminal_status
 
 -- Utility function for debug logging
 local function debug_log(msg)
@@ -79,12 +128,67 @@ local function debug_log(msg)
   end
 end
 
+-- Check if a directory should be excluded from search
+local function should_exclude_dir(name, search_config)
+  search_config = search_config or config.search
+
+  if search_config.exclude_hidden and name:match("^%.") then
+    return true
+  end
+
+  for _, excluded in ipairs(search_config.exclude_dirs or {}) do
+    if name == excluded then
+      return true
+    end
+  end
+
+  return false
+end
+
+-- Check if a filename matches any exclusion pattern (glob-style)
+local function should_exclude_file(name, search_config)
+  search_config = search_config or config.search
+
+  for _, pattern in ipairs(search_config.exclude_patterns or {}) do
+    -- Convert glob pattern to Lua pattern: * -> .*, ? -> ., . -> %.
+    local lua_pattern = "^" .. pattern:gsub("%.", "%%."):gsub("%*", ".*"):gsub("%?", ".") .. "$"
+    if name:match(lua_pattern) then
+      return true
+    end
+  end
+
+  return false
+end
+
+-- Expose for testing
+M._should_exclude_dir = should_exclude_dir
+M._should_exclude_file = should_exclude_file
+
 -- Improved terminal window creation with better error handling
 function M.create_floating_terminal(opts)
   opts = opts or {}
   
   local term_config = vim.tbl_deep_extend("force", config.terminal, opts)
-  
+
+  -- Validate title_pos
+  local valid_title_pos = { left = true, center = true, right = true }
+  if term_config.title_pos and not valid_title_pos[term_config.title_pos] then
+    vim.notify(
+      "[TermLet] Invalid title_pos '" .. tostring(term_config.title_pos)
+        .. "', falling back to 'center'. Valid values: left, center, right",
+      vim.log.levels.WARN)
+    term_config.title_pos = "center"
+  end
+
+  -- Validate border table length
+  if type(term_config.border) == "table" and #term_config.border ~= 8 then
+    vim.notify(
+      "[TermLet] Custom border table must have exactly 8 characters, got "
+        .. #term_config.border .. ". Falling back to 'rounded'.",
+      vim.log.levels.WARN)
+    term_config.border = "rounded"
+  end
+
   -- Calculate dimensions
   local height = math.floor(vim.o.lines * term_config.height_ratio)
   local width = math.floor(vim.o.columns * term_config.width_ratio)
@@ -218,10 +322,16 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
         local name, type = vim.loop.fs_scandir_next(handle)
         if not name then break end
         
-        if type == "directory" and not name:match("^%.") and name ~= "node_modules" and name ~= ".git" then
-          local sub_path = dir_path .. "/" .. name
-          local result = search_in_dir(sub_path, target_file, max_depth - 1)
-          if result then return result end
+        if type == "directory" then
+          if should_exclude_dir(name, config.search) then
+            debug_log("Skipping excluded directory: " .. dir_path .. "/" .. name)
+          else
+            local sub_path = dir_path .. "/" .. name
+            local result = search_in_dir(sub_path, target_file, max_depth - 1)
+            if result then return result end
+          end
+        elseif type == "file" and should_exclude_file(name, config.search) then
+          debug_log("Skipping excluded file: " .. dir_path .. "/" .. name)
         end
       end
     end
@@ -345,15 +455,7 @@ local function execute_script(script)
       local level = code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR
       vim.schedule(function()
         vim.notify(msg, level)
-        -- Update title with exit status indicator
-        local term_data = active_terminals[win]
-        if term_data and term_data.term_config.show_status
-            and vim.api.nvim_win_is_valid(win) then
-          local status = code == 0 and "success" or "error"
-          local new_title = format_terminal_title(
-            term_data.term_config, term_data.name, status)
-          vim.api.nvim_win_set_config(win, { title = new_title })
-        end
+        update_terminal_status(win, code)
       end)
     end,
     on_stdout = function(_, data)
