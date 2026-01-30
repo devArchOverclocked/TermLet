@@ -101,8 +101,11 @@ end
 ---@param str string The string to clean
 ---@return string The cleaned string
 function M.strip_ansi(str)
-  -- Remove ANSI CSI sequences: ESC [ ... final_byte
-  local cleaned = str:gsub("\27%[[%d;]*[A-Za-z]", "")
+  -- Remove ANSI CSI sequences: ESC [ (optional private-mode prefix ?/>/=) params final_byte
+  -- Private-mode prefixes like ? appear in common sequences:
+  --   \27[?25h (show cursor), \27[?25l (hide cursor),
+  --   \27[?1049h (alternate screen), \27[?7h (auto-wrap)
+  local cleaned = str:gsub("\27%[[?>=]*[%d;]*[A-Za-z@]", "")
   -- Remove OSC sequences: ESC ] ... ST (BEL or ESC \)
   cleaned = cleaned:gsub("\27%][^\a\27]*[\a]", "")
   cleaned = cleaned:gsub("\27%][^\a\27]*\27\\", "")

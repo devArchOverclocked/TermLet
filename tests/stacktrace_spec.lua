@@ -797,6 +797,30 @@ describe("termlet.stacktrace", function()
       local result = stacktrace.strip_ansi(input)
       assert.equals("/path/to/file.py:42: error", result)
     end)
+
+    it("should strip private-mode CSI sequences with ? prefix", function()
+      local input = "\27[?25l/path/to/file.py:42: error\27[?25h"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals("/path/to/file.py:42: error", result)
+    end)
+
+    it("should strip alternate screen buffer sequences", function()
+      local input = "\27[?1049h  File \"/home/user/test.py\", line 7\27[?1049l"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals('  File "/home/user/test.py", line 7', result)
+    end)
+
+    it("should strip > prefixed CSI sequences", function()
+      local input = "\27[>4;2m/path/to/file.py:42: error\27[>4m"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals("/path/to/file.py:42: error", result)
+    end)
+
+    it("should strip mixed private-mode and standard CSI sequences", function()
+      local input = "\27[?7h\27[1;31m/path/file.cpp:10:5:\27[0m error\27[?7l"
+      local result = stacktrace.strip_ansi(input)
+      assert.equals("/path/file.cpp:10:5: error", result)
+    end)
   end)
 
   describe("process_terminal_output with ANSI codes", function()
@@ -840,6 +864,20 @@ describe("termlet.stacktrace", function()
       assert.equals(1, #results)
       assert.equals("javascript", results[1].language)
       assert.equals(25, results[1].line)
+    end)
+
+    it("should detect stack trace through private-mode CSI sequences", function()
+      -- Simulate PTY output with cursor-control sequences wrapping the line
+      local data = {
+        '\27[?25l\27[0m  File "/home/user/test.py", line 10, in main\27[0m\27[?25h',
+      }
+
+      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
+
+      assert.equals(1, #results)
+      assert.equals("python", results[1].language)
+      assert.equals("/home/user/test.py", results[1].path)
+      assert.equals(10, results[1].line)
     end)
 
     it("should store ANSI-cleaned metadata with correct line numbers", function()
