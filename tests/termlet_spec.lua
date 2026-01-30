@@ -555,4 +555,186 @@ describe("termlet", function()
       assert.is_not_nil(termlet)
     end)
   end)
+
+  describe("replace_placeholder multiple occurrences", function()
+    it("should replace all occurrences of the same placeholder", function()
+      local cfg = {
+        title_format = "{name} - {name}",
+        title_icon = "",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "build", nil)
+      -- Both {name} placeholders should be replaced
+      assert.are.equal("build - build", result)
+    end)
+
+    it("should replace multiple {icon} occurrences", function()
+      local cfg = {
+        title_format = "{icon} {name} {icon}",
+        title_icon = "X",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "test", nil)
+      assert.is_truthy(result:find("X test X", 1, true))
+    end)
+
+    it("should replace multiple {status} occurrences", function()
+      local cfg = {
+        title_format = "{status} {name} {status}",
+        title_icon = "",
+        show_status = true,
+        status_icons = { running = "R" },
+      }
+      local result = termlet._format_terminal_title(cfg, "build", "running")
+      -- Both {status} should become "R"
+      local _, count = result:gsub("R", "")
+      assert.are.equal(2, count)
+    end)
+  end)
+
+  describe("update_terminal_status", function()
+    it("should update title with success status on exit code 0", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          show_status = true,
+          title_format = " {name} {status} ",
+          status_icons = { running = "●", success = "✓", error = "✗" },
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      assert.is_not_nil(win)
+
+      local updated = termlet._update_terminal_status(win, 0)
+      assert.is_true(updated)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      local title_text = ""
+      if type(win_config.title) == "string" then
+        title_text = win_config.title
+      elseif type(win_config.title) == "table" then
+        for _, part in ipairs(win_config.title) do
+          if type(part) == "table" then
+            title_text = title_text .. (part[1] or "")
+          elseif type(part) == "string" then
+            title_text = title_text .. part
+          end
+        end
+      end
+      assert.is_truthy(title_text:find("✓", 1, true))
+    end)
+
+    it("should update title with error status on non-zero exit code", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          show_status = true,
+          title_format = " {name} {status} ",
+          status_icons = { running = "●", success = "✓", error = "✗" },
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      assert.is_not_nil(win)
+
+      local updated = termlet._update_terminal_status(win, 1)
+      assert.is_true(updated)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      local title_text = ""
+      if type(win_config.title) == "string" then
+        title_text = win_config.title
+      elseif type(win_config.title) == "table" then
+        for _, part in ipairs(win_config.title) do
+          if type(part) == "table" then
+            title_text = title_text .. (part[1] or "")
+          elseif type(part) == "string" then
+            title_text = title_text .. part
+          end
+        end
+      end
+      assert.is_truthy(title_text:find("✗", 1, true))
+    end)
+
+    it("should return false when show_status is disabled", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          show_status = false,
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      assert.is_not_nil(win)
+
+      local updated = termlet._update_terminal_status(win, 0)
+      assert.is_false(updated)
+    end)
+
+    it("should return false for invalid window", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { show_status = true },
+      })
+      -- Use a window ID that doesn't exist
+      local updated = termlet._update_terminal_status(99999, 0)
+      assert.is_false(updated)
+    end)
+  end)
+
+  describe("title_pos validation", function()
+    it("should fall back to center for invalid title_pos", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { title_pos = "middle" },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(win)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      assert.are.equal("center", win_config.title_pos)
+    end)
+
+    it("should accept valid title_pos values", function()
+      for _, pos in ipairs({ "left", "center", "right" }) do
+        termlet.setup({
+          scripts = {},
+          terminal = { title_pos = pos },
+        })
+        local buf, win = termlet.create_floating_terminal({})
+        assert.is_not_nil(win)
+
+        local win_config = vim.api.nvim_win_get_config(win)
+        assert.are.equal(pos, win_config.title_pos)
+      end
+    end)
+  end)
+
+  describe("border table validation", function()
+    it("should fall back to rounded for border table with wrong length", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          border = { "╭", "─", "╮", "│", "╯" }, -- only 5 elements
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(win)
+      -- Should not error — falls back to "rounded"
+    end)
+
+    it("should accept border table with exactly 8 elements", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          border = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(win)
+
+      local win_config = vim.api.nvim_win_get_config(win)
+      assert.is_table(win_config.border)
+    end)
+  end)
 end)
