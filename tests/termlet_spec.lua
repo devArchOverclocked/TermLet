@@ -1381,4 +1381,107 @@ describe("termlet", function()
       assert.is_truthy(result:find("run.sh", 1, true))
     end)
   end)
+
+  describe("keybindings", function()
+    before_each(function()
+      -- Use a temporary config file for testing
+      local keybindings_module = require("termlet.keybindings")
+      local test_config_path = vim.fn.tempname() .. "-termlet-keybindings.json"
+      keybindings_module.set_config_path(test_config_path)
+      keybindings_module._set_keybindings({})
+    end)
+
+    it("should open keybindings UI", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+        },
+      })
+
+      local result = termlet.open_keybindings()
+      assert.is_true(result)
+      assert.is_true(termlet.is_keybindings_open())
+    end)
+
+    it("should return false when no scripts configured", function()
+      termlet.setup({
+        scripts = {},
+      })
+
+      local result = termlet.open_keybindings()
+      assert.is_false(result)
+    end)
+
+    it("should close keybindings UI", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+        },
+      })
+
+      termlet.open_keybindings()
+      assert.is_true(termlet.is_keybindings_open())
+
+      termlet.close_keybindings()
+      assert.is_false(termlet.is_keybindings_open())
+    end)
+
+    it("should toggle keybindings UI", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+        },
+      })
+
+      assert.is_false(termlet.is_keybindings_open())
+      termlet.toggle_keybindings()
+      assert.is_true(termlet.is_keybindings_open())
+      termlet.toggle_keybindings()
+      assert.is_false(termlet.is_keybindings_open())
+    end)
+
+    it("should set keybinding programmatically", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+        },
+      })
+
+      local result = termlet.set_keybinding("build", "<leader>b")
+      assert.is_true(result)
+
+      local bindings = termlet.get_keybindings()
+      assert.equals("<leader>b", bindings["build"])
+    end)
+
+    it("should clear keybinding programmatically", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+        },
+      })
+
+      termlet.set_keybinding("build", "<leader>b")
+      termlet.clear_keybinding("build")
+
+      local bindings = termlet.get_keybindings()
+      assert.is_nil(bindings["build"])
+    end)
+
+    it("should get all keybindings", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+          { name = "test", filename = "test.sh" },
+        },
+      })
+
+      termlet.set_keybinding("build", "<leader>b")
+      termlet.set_keybinding("test", "<leader>t")
+
+      local bindings = termlet.get_keybindings()
+      assert.equals("<leader>b", bindings["build"])
+      assert.equals("<leader>t", bindings["test"])
+    end)
+  end)
 end)
