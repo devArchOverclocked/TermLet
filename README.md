@@ -92,6 +92,12 @@ Here's the full configuration structure:
     border = "rounded", -- Menu border style
     title = " TermLet Scripts " -- Menu window title
   },
+  search = {
+    exclude_dirs = {},   -- Directories to exclude from search (defaults include node_modules, .git, etc.)
+    exclude_hidden = true, -- Exclude hidden directories (starting with .)
+    exclude_patterns = {}, -- Glob patterns to exclude files (e.g., "*.min.*")
+    max_depth = 5,       -- Maximum recursion depth for file search
+  },
   stacktrace = {
     enabled = true,     -- Enable stack trace detection
     languages = {},     -- Filter to specific languages (empty = all)
