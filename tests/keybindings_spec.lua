@@ -461,6 +461,34 @@ describe("termlet.keybindings", function()
       state = keybindings.get_state()
       assert.equals(initial_index, state.selected_index)
     end)
+
+    it("should not re-enter capture mode when already in capture mode", function()
+      keybindings.actions.enter_capture_mode()
+      keybindings._set_captured_keys({ "<C-k>" })
+      local state = keybindings.get_state()
+      assert.equals("capture", state.mode)
+      assert.same({ "<C-k>" }, state.captured_keys)
+
+      -- Calling enter_capture_mode again should be a no-op (mode guard)
+      keybindings.actions.enter_capture_mode()
+      state = keybindings.get_state()
+      assert.equals("capture", state.mode)
+      -- captured_keys should NOT have been reset
+      assert.same({ "<C-k>" }, state.captured_keys)
+    end)
+
+    it("should not enter capture mode when already in input mode", function()
+      keybindings.actions.enter_input_mode()
+      keybindings._set_input_text("<leader>x")
+      local state = keybindings.get_state()
+      assert.equals("input", state.mode)
+
+      -- Calling enter_capture_mode should be a no-op
+      keybindings.actions.enter_capture_mode()
+      state = keybindings.get_state()
+      assert.equals("input", state.mode)
+      assert.equals("<leader>x", state.input_text)
+    end)
   end)
 
   describe("input mode", function()
@@ -520,6 +548,34 @@ describe("termlet.keybindings", function()
       keybindings.actions.move_down()
       state = keybindings.get_state()
       assert.equals(initial_index, state.selected_index)
+    end)
+
+    it("should not re-enter input mode when already in input mode", function()
+      keybindings.actions.enter_input_mode()
+      keybindings._set_input_text("<C-j>")
+      local state = keybindings.get_state()
+      assert.equals("input", state.mode)
+      assert.equals("<C-j>", state.input_text)
+
+      -- Calling enter_input_mode again should be a no-op (mode guard)
+      keybindings.actions.enter_input_mode()
+      state = keybindings.get_state()
+      assert.equals("input", state.mode)
+      -- input_text should NOT have been reset
+      assert.equals("<C-j>", state.input_text)
+    end)
+
+    it("should not enter input mode when already in capture mode", function()
+      keybindings.actions.enter_capture_mode()
+      keybindings._set_captured_keys({ "<Space>", "f" })
+      local state = keybindings.get_state()
+      assert.equals("capture", state.mode)
+
+      -- Calling enter_input_mode should be a no-op
+      keybindings.actions.enter_input_mode()
+      state = keybindings.get_state()
+      assert.equals("capture", state.mode)
+      assert.same({ "<Space>", "f" }, state.captured_keys)
     end)
   end)
 

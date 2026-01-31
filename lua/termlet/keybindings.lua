@@ -116,39 +116,31 @@ local function format_keybinding_line(script, keybinding, is_selected, width)
   local prefix = is_selected and "  > " or "    "
   local name = script.name or "unnamed"
 
-  -- Calculate column widths
+  -- Calculate column widths (must match header in render_ui)
   local name_width = math.floor(width * 0.35)
   local key_width = math.floor(width * 0.25)
+  local action_width = 16 -- length of "[Change] [Clear]"
 
-  -- Format script name
-  local padded_name = name:sub(1, name_width)
-  if #padded_name < name_width then
-    padded_name = padded_name .. string.rep(" ", name_width - #padded_name)
-  end
+  -- Format all columns with string.format for consistent alignment
+  local padded_name = string.format("%-" .. name_width .. "s", name:sub(1, name_width))
 
-  -- Format keybinding
   local key_display
   if keybinding and keybinding ~= "" then
     key_display = keybinding
   else
     key_display = "(not set)"
   end
-  local padded_key = key_display:sub(1, key_width)
-  if #padded_key < key_width then
-    padded_key = padded_key .. string.rep(" ", key_width - #padded_key)
-  end
+  local padded_key = string.format("%-" .. key_width .. "s", key_display:sub(1, key_width))
 
-  -- Format action hint with fixed-width padding for alignment
-  local action_width = 16 -- length of "[Change] [Clear]"
   local action_text
   if keybinding and keybinding ~= "" then
     action_text = "[Change] [Clear]"
   else
     action_text = "[Set]"
   end
-  local action = string.format("%-" .. action_width .. "s", action_text)
+  local padded_action = string.format("%-" .. action_width .. "s", action_text)
 
-  return prefix .. padded_name .. "  " .. padded_key .. "  " .. action
+  return prefix .. padded_name .. "  " .. padded_key .. "  " .. padded_action
 end
 
 --- Render the keybindings UI
@@ -428,19 +420,30 @@ local function apply_captured_keybinding(keybinding_str)
 end
 
 --- Exit capture or input mode and return to normal
-local function exit_capture()
+---@param skip_render boolean|nil If true, skip the render_ui() call
+local function exit_capture(skip_render)
   stop_capture_timer()
   detach_on_key()
   state.mode = "normal"
   state.captured_keys = {}
   state.input_text = ""
   restore_footer()
-  render_ui()
+  if not skip_render then
+    render_ui()
+  end
 end
 
 --- Enter real-time key capture mode using vim.on_key
 local function enter_capture_mode()
   if #state.scripts == 0 then
+    return
+  end
+  -- Guard: prevent re-entry when already in capture/input mode.
+  -- The buffer keymap for <CR> fires synchronously, while the vim.on_key
+  -- handler fires via vim.schedule(). Without this guard, pressing Enter
+  -- to confirm a capture would re-enter this function and reset state
+  -- before the deferred on_key callback processes the confirmation.
+  if state.mode == "capture" or state.mode == "input" then
     return
   end
 
@@ -492,17 +495,10 @@ local function enter_capture_mode()
       if notation == "<CR>" then
         if #state.captured_keys > 0 then
           local keybinding_str = table.concat(state.captured_keys, "")
-          -- Inline cleanup WITHOUT premature render_ui() call.
-          -- exit_capture() internally calls render_ui() which would render
-          -- the old state before the keybinding is applied, causing the UI
-          -- to flash back to "(waiting...)" and never show the new binding.
-          stop_capture_timer()
-          detach_on_key()
-          state.mode = "normal"
-          state.captured_keys = {}
-          state.input_text = ""
-          restore_footer()
-          -- Apply the keybinding THEN render (single render with updated data)
+          -- Clean up capture state WITHOUT rendering (skip_render=true).
+          -- We must apply the keybinding before rendering so the UI shows
+          -- the newly set keybinding instead of flashing back to "(waiting...)".
+          exit_capture(true)
           apply_captured_keybinding(keybinding_str)
           render_ui()
         end
@@ -519,6 +515,10 @@ end
 --- Enter text input mode for typing keybinding notation directly
 local function enter_input_mode()
   if #state.scripts == 0 then
+    return
+  end
+  -- Guard: prevent re-entry when already in capture/input mode (same race as above)
+  if state.mode == "capture" or state.mode == "input" then
     return
   end
 
@@ -568,16 +568,9 @@ local function enter_input_mode()
       if notation == "<CR>" then
         if state.input_text ~= "" then
           local keybinding_str = state.input_text
-          -- Inline cleanup WITHOUT premature render_ui() call.
-          -- Same fix as capture mode: exit_capture() would render the old
-          -- state before the keybinding is applied.
-          stop_capture_timer()
-          detach_on_key()
-          state.mode = "normal"
-          state.captured_keys = {}
-          state.input_text = ""
-          restore_footer()
-          -- Apply the keybinding THEN render (single render with updated data)
+          -- Clean up input state WITHOUT rendering (skip_render=true).
+          -- Same as capture mode: apply keybinding before rendering.
+          exit_capture(true)
           apply_captured_keybinding(keybinding_str)
           render_ui()
         end
