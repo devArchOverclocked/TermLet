@@ -91,6 +91,12 @@ Here's the full configuration structure:
     border = "rounded", -- Menu border style
     title = " TermLet Scripts " -- Menu window title
   },
+  stacktrace = {
+    enabled = false,                    -- Enable stack trace parsing
+    languages = { 'python', 'csharp' }, -- Built-in parsers to load
+    custom_parsers = {},                -- Custom parser definitions
+    parser_order = { 'custom', 'builtin' }, -- Parser priority
+  },
   debug = false,        -- Enable verbose debug logging
 }
 ```
@@ -210,6 +216,88 @@ Additional utility methods:
 * `require("termlet").is_menu_open()` – check if menu is currently open
 * `require("termlet").close_all_terminals()` – close all terminals
 * `require("termlet").close_terminal()` – close the current or last terminal
+
+---
+
+## 🔍 Stack Trace Parser Plugin System
+
+TermLet includes an extensible stack trace parser plugin architecture that allows parsing stack traces from multiple programming languages.
+
+### Quick Start
+
+Enable stack trace parsing for Python and C#:
+
+```lua
+require("termlet").setup({
+  stacktrace = {
+    enabled = true,
+    languages = { 'python', 'csharp' },
+  }
+})
+```
+
+### Built-in Language Support
+
+TermLet includes parsers for:
+- **Python** - Standard tracebacks, pytest format
+- **C#** - .NET stack traces, MSBuild errors
+- **JavaScript** - Node.js, browser, webpack formats
+- **Java** - Standard stack traces, compiler errors
+
+### Using the Parser API
+
+Parse stack trace lines:
+
+```lua
+local stacktrace = require('termlet.stacktrace')
+
+-- Parse a single line
+local result = stacktrace.parse_line('  File "/path/file.py", line 42')
+-- Returns: { parser_name = "python", file_path = "/path/file.py", line_number = 42 }
+
+-- Parse multiple lines
+local results = stacktrace.parse_lines(terminal_buffer_lines)
+```
+
+### Creating Custom Parsers
+
+Create parsers for any language:
+
+```lua
+local my_parser = {
+  name = 'go',
+  description = 'Go panic and error traces',
+
+  patterns = {
+    {
+      pattern = '([^:]+%.go):(%d+)',
+      path_group = 1,
+      line_group = 2,
+    }
+  },
+
+  resolve_path = function(path, cwd)
+    -- Custom path resolution logic
+    return path
+  end,
+}
+
+require('termlet').setup({
+  stacktrace = {
+    enabled = true,
+    custom_parsers = { my_parser },
+  }
+})
+```
+
+### Parser Development
+
+See the [Parser Development Guide](docs/PARSER_DEVELOPMENT.md) for:
+- Complete parser structure documentation
+- Pattern syntax reference
+- Built-in parser examples
+- Testing guidelines
+- Best practices
 
 ---
 

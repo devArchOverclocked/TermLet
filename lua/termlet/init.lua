@@ -3,6 +3,9 @@ local M = {}
 -- Load menu module
 local menu = require("termlet.menu")
 
+-- Load stacktrace module
+local stacktrace = require("termlet.stacktrace")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -32,6 +35,12 @@ local config = {
     height_ratio = 0.5,
     border = "rounded",
     title = " TermLet Scripts ",
+  },
+  stacktrace = {
+    enabled = false,
+    languages = {},
+    custom_parsers = {},
+    parser_order = { "custom", "builtin" },
   },
   debug = false,
 }
@@ -425,7 +434,12 @@ function M.setup(user_config)
   if user_config then
     config = vim.tbl_deep_extend("force", config, user_config)
   end
-  
+
+  -- Initialize stacktrace module if enabled
+  if config.stacktrace and config.stacktrace.enabled then
+    stacktrace.setup(config.stacktrace)
+  end
+
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
     vim.notify("Invalid scripts configuration", vim.log.levels.ERROR)
@@ -569,5 +583,8 @@ function M.toggle_menu()
     M.open_menu()
   end
 end
+
+-- Expose stacktrace module functions
+M.stacktrace = stacktrace
 
 return M
