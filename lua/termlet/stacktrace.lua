@@ -448,6 +448,32 @@ function M.scan_buffer_for_stacktraces(buffer_id, cwd)
   return results
 end
 
+-- Load the parser plugin module
+-- Note: require("termlet.stacktrace") resolves to this file (stacktrace.lua),
+-- so the parser module at stacktrace/init.lua is loaded via dofile to avoid conflicts.
+local parser_module
+do
+  local info = debug.getinfo(1, "S")
+  local this_dir = vim.fn.fnamemodify(info.source:sub(2), ":h")
+  local parser_init = this_dir .. "/stacktrace/init.lua"
+  if vim.fn.filereadable(parser_init) == 1 then
+    parser_module = dofile(parser_init)
+  end
+end
+
+-- Re-export parser module functions
+if parser_module then
+  M.register_parser = parser_module.register_parser
+  M.unregister_parser = parser_module.unregister_parser
+  M.get_parser = parser_module.get_parser
+  M.get_all_parsers = parser_module.get_all_parsers
+  M.clear_parsers = parser_module.clear_parsers
+  M.parse_line = parser_module.parse_line
+  M.parse_line_all = parser_module.parse_line_all
+  M.parse_lines = parser_module.parse_lines
+  M.get_parser_config = parser_module.get_config
+end
+
 ---Configure the stacktrace module
 ---@param user_config table User configuration
 function M.setup(user_config)
@@ -458,6 +484,11 @@ function M.setup(user_config)
   -- Register built-in patterns if none exist
   if #pattern_list == 0 then
     M.register_builtin_patterns()
+  end
+
+  -- Setup parser plugin module if available
+  if parser_module then
+    parser_module.setup(user_config or {})
   end
 end
 

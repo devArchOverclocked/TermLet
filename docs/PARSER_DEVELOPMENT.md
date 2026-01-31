@@ -439,7 +439,7 @@ local M = {
       line_group = 2,
       column_group = 3,
     },
-  ],
+  },
 
   resolve_path = function(path, cwd)
     -- Absolute path

@@ -7,9 +7,9 @@ local M = {
 
   patterns = {
     {
-      -- Standard .NET stack trace format
+      -- Windows .NET stack trace format (drive letter path)
       -- Example: "   at ClassName.MethodName() in C:\path\to\File.cs:line 42"
-      pattern = "%s+at%s+.-%s+in%s+([^:]+):line%s+(%d+)",
+      pattern = "%s+at%s+.-%s+in%s+(%a:\\[^:]+):line%s+(%d+)",
       path_group = 1,
       line_group = 2,
     },

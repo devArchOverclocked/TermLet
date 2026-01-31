@@ -546,13 +546,15 @@ describe("termlet.stacktrace", function()
       stacktrace.register_parser(csharp_parser)
     end)
 
-    it("should parse standard .NET stack trace format", function()
+    it("should parse standard .NET stack trace format with Windows path", function()
       local line = "   at ClassName.MethodName() in C:\\path\\to\\File.cs:line 42"
       local result = stacktrace.parse_line(line)
 
       assert.is_not_nil(result)
       assert.are.equal("csharp", result.parser_name)
-      assert.is_truthy(result.file_path:match("File.cs"))
+      -- Verify full Windows path is captured (not just drive letter)
+      -- resolve_path normalizes backslashes to forward slashes
+      assert.are.equal("C:/path/to/File.cs", result.file_path)
       assert.are.equal(42, result.line_number)
     end)
 
@@ -632,6 +634,270 @@ describe("termlet.stacktrace", function()
       assert.is_not_nil(result)
       assert.are.equal("FileName.java", result.file_path)
       assert.are.equal(99, result.line_number)
+    end)
+  end)
+
+  describe("setup idempotency", function()
+    it("should allow calling setup() twice without errors", function()
+      stacktrace.setup({
+        languages = { "python" }
+      })
+      local python1 = stacktrace.get_parser("python")
+      assert.is_not_nil(python1)
+
+      -- Second call should not fail
+      stacktrace.setup({
+        languages = { "python", "csharp" }
+      })
+      local python2 = stacktrace.get_parser("python")
+      local csharp = stacktrace.get_parser("csharp")
+      assert.is_not_nil(python2)
+      assert.is_not_nil(csharp)
+    end)
+
+    it("should replace parsers when setup() called with different config", function()
+      stacktrace.setup({
+        languages = { "python", "csharp" }
+      })
+      assert.is_not_nil(stacktrace.get_parser("python"))
+      assert.is_not_nil(stacktrace.get_parser("csharp"))
+
+      -- Second setup with only python
+      stacktrace.setup({
+        languages = { "python" }
+      })
+      assert.is_not_nil(stacktrace.get_parser("python"))
+      assert.is_nil(stacktrace.get_parser("csharp"))
+    end)
+  end)
+
+  describe("parser ordering determinism", function()
+    it("should respect custom before builtin order", function()
+      local custom_parser = {
+        name = "custom_at",
+        patterns = {
+          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        custom = true,
+      }
+      local builtin_parser = {
+        name = "builtin_at",
+        patterns = {
+          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+      }
+
+      stacktrace.register_parser(builtin_parser)
+      stacktrace.register_parser(custom_parser)
+
+      -- With default parser_order = { "custom", "builtin" }, custom should match first
+      local result = stacktrace.parse_line("  at file.txt:42")
+      assert.is_not_nil(result)
+      assert.are.equal("custom_at", result.parser_name)
+    end)
+
+    it("should return parsers in insertion order via get_all_parsers", function()
+      local parser_a = {
+        name = "aaa",
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+      }
+      local parser_b = {
+        name = "bbb",
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+      }
+      local parser_c = {
+        name = "ccc",
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+      }
+
+      stacktrace.register_parser(parser_a)
+      stacktrace.register_parser(parser_b)
+      stacktrace.register_parser(parser_c)
+
+      local all = stacktrace.get_all_parsers()
+      assert.are.equal(3, #all)
+      assert.are.equal("aaa", all[1].name)
+      assert.are.equal("bbb", all[2].name)
+      assert.are.equal("ccc", all[3].name)
+    end)
+  end)
+
+  describe("empty optional column capture", function()
+    it("should return nil column_number for empty optional capture", function()
+      local parser = {
+        name = "optional_col",
+        patterns = {
+          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      -- Line without column number - (%d*) matches empty string
+      local result = stacktrace.parse_line("file.txt:42")
+      assert.is_not_nil(result)
+      assert.are.equal("file.txt", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.is_nil(result.column_number)
+    end)
+
+    it("should return column_number when present", function()
+      local parser = {
+        name = "optional_col2",
+        patterns = {
+          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line("file.txt:42:15")
+      assert.is_not_nil(result)
+      assert.are.equal(15, result.column_number)
+    end)
+  end)
+
+  describe("parse_line with invalid input types", function()
+    it("should return nil for number input", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line(123)
+      assert.is_nil(result)
+    end)
+
+    it("should return nil for table input", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line({})
+      assert.is_nil(result)
+    end)
+
+    it("should return nil for boolean input", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line(true)
+      assert.is_nil(result)
+    end)
+  end)
+
+  describe("is_context_match disambiguation", function()
+    it("should use is_context_match to disambiguate in parse_lines", function()
+      -- Register two parsers that both match "at" patterns
+      local parser_csharp_like = {
+        name = "csharp_like",
+        patterns = {
+          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        is_context_match = function(lines, index)
+          for i = math.max(1, index - 3), math.min(#lines, index + 3) do
+            if lines[i] and lines[i]:match("%.cs:") then
+              return true
+            end
+          end
+          return false
+        end,
+      }
+      local parser_java_like = {
+        name = "java_like",
+        patterns = {
+          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        is_context_match = function(lines, index)
+          for i = math.max(1, index - 3), math.min(#lines, index + 3) do
+            if lines[i] and lines[i]:match("%.java:") then
+              return true
+            end
+          end
+          return false
+        end,
+      }
+
+      stacktrace.register_parser(parser_csharp_like)
+      stacktrace.register_parser(parser_java_like)
+
+      -- Java context lines
+      local lines = {
+        "Exception in thread main",
+        "  at com.example.Class:42",
+        "  at App.java:10",
+      }
+
+      local results = stacktrace.parse_lines(lines)
+      -- The second line should disambiguate to java_like due to .java: context
+      local java_match = nil
+      for _, r in ipairs(results) do
+        if r.line_index == 2 then
+          java_match = r
+          break
+        end
+      end
+      assert.is_not_nil(java_match)
+      assert.are.equal("java_like", java_match.parser_name)
+    end)
+  end)
+
+  describe("setup does not mutate user objects", function()
+    it("should not add .custom field to user-provided parser table", function()
+      local my_parser = {
+        name = "user_parser",
+        patterns = {
+          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+
+      stacktrace.setup({
+        custom_parsers = { my_parser }
+      })
+
+      -- The original table should NOT have been mutated
+      assert.is_nil(my_parser.custom)
+    end)
+  end)
+
+  describe("C# parser Windows paths", function()
+    local csharp_parser
+
+    before_each(function()
+      package.loaded["termlet.parsers.csharp"] = nil
+      csharp_parser = require("termlet.parsers.csharp")
+      stacktrace.register_parser(csharp_parser)
+    end)
+
+    it("should capture full Windows path including drive letter", function()
+      local line = "   at MyClass.Method() in C:\\Users\\dev\\Project\\File.cs:line 42"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("csharp", result.parser_name)
+      -- resolve_path normalizes backslashes to forward slashes
+      assert.are.equal("C:/Users/dev/Project/File.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+
+    it("should capture full Windows path with D drive", function()
+      local line = "   at MyClass.Method() in D:\\code\\src\\Program.cs:line 100"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      -- resolve_path normalizes backslashes to forward slashes
+      assert.are.equal("D:/code/src/Program.cs", result.file_path)
+      assert.are.equal(100, result.line_number)
     end)
   end)
 
