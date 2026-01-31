@@ -30,6 +30,28 @@ local config = {
       error = "✗",
     },
   },
+  search = {
+    exclude_dirs = {
+      "node_modules",
+      ".git",
+      ".svn",
+      ".hg",
+      "dist",
+      "build",
+      "target",
+      "__pycache__",
+      ".cache",
+      ".tox",
+      ".mypy_cache",
+      ".pytest_cache",
+      "vendor",
+      "venv",
+      ".venv",
+      "env",
+    },
+    exclude_hidden = true,
+    exclude_patterns = {},
+  },
   menu = {
     width_ratio = 0.6,
     height_ratio = 0.5,
@@ -113,6 +135,43 @@ local function debug_log(msg)
     print("[TermLet] " .. msg)
   end
 end
+
+-- Check if a directory should be excluded from search
+local function should_exclude_dir(name, search_config)
+  search_config = search_config or config.search
+
+  if search_config.exclude_hidden and name:match("^%.") then
+    return true
+  end
+
+  for _, excluded in ipairs(search_config.exclude_dirs or {}) do
+    if name == excluded then
+      return true
+    end
+  end
+
+  return false
+end
+
+-- Check if a filename matches any exclusion pattern (glob-style)
+local function should_exclude_file(name, search_config)
+  search_config = search_config or config.search
+
+  for _, pattern in ipairs(search_config.exclude_patterns or {}) do
+    -- Escape all Lua pattern metacharacters first, then convert glob wildcards
+    local lua_pattern = pattern:gsub("([%(%)%.%%%+%-%[%]%^%$])", "%%%1")
+    lua_pattern = "^" .. lua_pattern:gsub("%*", ".*"):gsub("%?", ".") .. "$"
+    if name:match(lua_pattern) then
+      return true
+    end
+  end
+
+  return false
+end
+
+-- Expose for testing
+M._should_exclude_dir = should_exclude_dir
+M._should_exclude_file = should_exclude_file
 
 -- Improved terminal window creation with better error handling
 function M.create_floating_terminal(opts)
@@ -258,7 +317,13 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   local function search_in_dir(dir_path, target_file, max_depth)
     max_depth = max_depth or 5 -- Increased depth for root-based search
     if max_depth <= 0 then return nil end
-    
+
+    -- Check if the target file itself is excluded by patterns
+    if should_exclude_file(target_file, config.search) then
+      debug_log("Skipping excluded target file: " .. target_file)
+      return nil
+    end
+
     local full_path = dir_path .. "/" .. target_file
     if vim.fn.filereadable(full_path) == 1 then
       debug_log("Found script at: " .. full_path)
@@ -272,10 +337,16 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
         local name, type = vim.loop.fs_scandir_next(handle)
         if not name then break end
         
-        if type == "directory" and not name:match("^%.") and name ~= "node_modules" and name ~= ".git" then
-          local sub_path = dir_path .. "/" .. name
-          local result = search_in_dir(sub_path, target_file, max_depth - 1)
-          if result then return result end
+        if type == "directory" then
+          if should_exclude_dir(name, config.search) then
+            debug_log("Skipping excluded directory: " .. dir_path .. "/" .. name)
+          else
+            local sub_path = dir_path .. "/" .. name
+            local result = search_in_dir(sub_path, target_file, max_depth - 1)
+            if result then return result end
+          end
+        elseif type == "file" and should_exclude_file(name, config.search) then
+          debug_log("Skipping excluded file: " .. dir_path .. "/" .. name)
         end
       end
     end
@@ -284,10 +355,14 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   end
   
   -- First, try direct search in root directory
-  local direct_path = search_root .. "/" .. filename
-  if vim.fn.filereadable(direct_path) == 1 then
-    debug_log("Found script directly at: " .. direct_path)
-    return direct_path
+  if not should_exclude_file(filename, config.search) then
+    local direct_path = search_root .. "/" .. filename
+    if vim.fn.filereadable(direct_path) == 1 then
+      debug_log("Found script directly at: " .. direct_path)
+      return direct_path
+    end
+  else
+    debug_log("Skipping excluded file in direct search: " .. filename)
   end
   
   -- Then search in common script directories within root
