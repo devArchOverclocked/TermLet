@@ -12,6 +12,7 @@
 * 🎨 **Interactive script menu** - Mason-like popup for browsing and executing scripts
 * 🔀 **Dynamic function generation** for each script (e.g. `:lua require('termlet').run_my_script()`)
 * 😹 **Terminal cleanup** and safe resource handling
+* 🔍 **Stack trace detection** — automatically detect file references in error output and jump to source
 * 🧪 **Debug-friendly** with verbose logging option
 
 ---
@@ -44,7 +45,7 @@ use {
 }
 ```
 
-Using [lazy.nvim](https://github.com/LazyVim/LazyVim):
+Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "devArchOverclocked/termlet",
@@ -90,6 +91,11 @@ Here's the full configuration structure:
     height_ratio = 0.5, -- Menu window height (fraction of screen)
     border = "rounded", -- Menu border style
     title = " TermLet Scripts " -- Menu window title
+  },
+  stacktrace = {
+    enabled = true,     -- Enable stack trace detection
+    languages = {},     -- Filter to specific languages (empty = all)
+    buffer_size = 50,   -- Lines kept in buffer for multi-line detection
   },
   debug = false,        -- Enable verbose debug logging
 }
@@ -213,6 +219,49 @@ Additional utility methods:
 
 ---
 
+## 🔍 Stack Trace Detection
+
+TermLet automatically detects file references in terminal error output. When a script produces a stack trace or compiler error, you can jump directly to the source location.
+
+### Supported Languages
+
+Python, JavaScript/TypeScript, Java, C#, Go, Rust, Ruby, Lua, C/C++, PHP, Perl, Elixir, Erlang, Swift, Kotlin, Haskell.
+
+### Usage
+
+Add a keybinding to jump to the nearest stack trace reference:
+
+```lua
+vim.keymap.set("n", "<leader>tg", function()
+  require("termlet").goto_stacktrace()
+end, { desc = "Go to stack trace file" })
+```
+
+You can also query stack trace info programmatically:
+
+```lua
+local info = require("termlet").get_stacktrace_at_cursor()
+if info then
+  print("File: " .. info.path)
+  print("Line: " .. info.line)
+end
+```
+
+### Custom Patterns
+
+Register patterns for additional languages or custom error formats:
+
+```lua
+require("termlet").stacktrace.register_pattern("myformat", {
+  pattern = "ERROR at ([^:]+):(%d+)",
+  file_pattern = "ERROR at ([^:]+):%d+",
+  line_pattern = ":(%d+)$",
+  priority = 10,
+})
+```
+
+---
+
 ## ✅ Example using [Packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
@@ -251,7 +300,7 @@ end, { desc = "Open TermLet Script Menu" })
 ```
 
 
-## ✅ Example ```termlet.lua``` using [lazy.nvim](https://github.com/LazyVim/LazyVim):
+## ✅ Example ```termlet.lua``` using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 return {

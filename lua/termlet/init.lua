@@ -3,6 +3,9 @@ local M = {}
 -- Load menu module
 local menu = require("termlet.menu")
 
+-- Load stacktrace module
+local stacktrace = require("termlet.stacktrace")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -32,6 +35,11 @@ local config = {
     height_ratio = 0.5,
     border = "rounded",
     title = " TermLet Scripts ",
+  },
+  stacktrace = {
+    enabled = true,           -- Enable stack trace detection
+    languages = {},           -- Languages to detect (empty = all)
+    buffer_size = 50,         -- Lines to keep in buffer for multi-line detection
   },
   debug = false,
 }
@@ -347,7 +355,7 @@ end
 -- Improved script execution with better error handling
 local function execute_script(script)
   local full_path
-  
+
   -- Determine how to find the script
   if script.filename then
     -- New method: find by filename from root directory
@@ -359,31 +367,42 @@ local function execute_script(script)
     vim.notify("Script '" .. script.name .. "' must specify either 'filename' (with optional 'root_dir') or both 'dir_name' and 'relative_path'", vim.log.levels.ERROR)
     return false
   end
-  
+
   if not full_path then
     local search_info = script.filename and ("filename: " .. script.filename .. (script.root_dir and (", root: " .. script.root_dir) or "")) or ("dir: " .. script.dir_name .. ", path: " .. script.relative_path)
     vim.notify("Script '" .. script.name .. "' not found (" .. search_info .. ")", vim.log.levels.ERROR)
     return false
   end
-  
+
   local cwd = vim.fn.fnamemodify(full_path, ":h")
   local script_name = vim.fn.fnamemodify(full_path, ":t")
-  
+
   -- Create terminal with script name as title
   local buf, win = M.create_floating_terminal({
     title = script.name or script_name
   })
-  
+
   if not buf or not win then
     return false
   end
-  
+
+  -- Clear stacktrace buffer and all metadata for new execution.
+  -- We use clear_all_metadata() rather than clear_metadata(buf) because Neovim
+  -- can recycle buffer IDs, so stale metadata from previous buffers may persist.
+  if config.stacktrace.enabled then
+    stacktrace.clear_buffer()
+    stacktrace.clear_all_metadata()
+  end
+
   -- Determine command based on file extension or explicit command
   local cmd = script.cmd or ("./" .. script_name)
-  
+
   debug_log("Executing: " .. cmd .. " in " .. cwd)
-  
-  -- Run the command in the terminal
+
+  -- Run the command in the terminal.
+  -- Note: termopen() creates a pseudo-terminal (PTY), which merges stdout and
+  -- stderr into a single stream. on_stderr is never called with termopen().
+  -- All output (including stderr) arrives through on_stdout.
   local job_id = vim.fn.termopen(cmd, {
     cwd = cwd,
     on_exit = function(_, code)
@@ -392,22 +411,29 @@ local function execute_script(script)
       vim.schedule(function()
         vim.notify(msg, level)
         update_terminal_status(win, code)
+        -- After process exits, scan the terminal buffer for stack traces.
+        -- This is the most reliable detection method because Neovim strips
+        -- ANSI escape codes from terminal buffer content read via the API,
+        -- and line numbers are accurate 1-indexed values matching cursor positions.
+        if config.stacktrace.enabled and buf and vim.api.nvim_buf_is_valid(buf) then
+          stacktrace.clear_metadata(buf)
+          stacktrace.scan_buffer_for_stacktraces(buf, cwd)
+        end
       end)
     end,
     on_stdout = function(_, data)
-      -- Optional: Handle stdout if needed
+      -- Process stdout for real-time stack trace detection.
+      -- ANSI escape codes are stripped before pattern matching.
+      if config.stacktrace.enabled then
+        stacktrace.process_terminal_output(data, cwd, buf)
+      end
+      -- Call user-defined callback if provided
       if script.on_stdout then
         script.on_stdout(data)
       end
     end,
-    on_stderr = function(_, data)
-      -- Optional: Handle stderr if needed
-      if script.on_stderr then
-        script.on_stderr(data)
-      end
-    end,
   })
-  
+
   if job_id <= 0 then
     vim.notify("Failed to start " .. script.name, vim.log.levels.ERROR)
     vim.api.nvim_win_close(win, true)
@@ -425,7 +451,10 @@ function M.setup(user_config)
   if user_config then
     config = vim.tbl_deep_extend("force", config, user_config)
   end
-  
+
+  -- Initialize stacktrace module with configuration
+  stacktrace.setup(config.stacktrace)
+
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
     vim.notify("Invalid scripts configuration", vim.log.levels.ERROR)
@@ -568,6 +597,60 @@ function M.toggle_menu()
   else
     M.open_menu()
   end
+end
+
+-- Stacktrace module access
+M.stacktrace = stacktrace
+
+-- Get file info at cursor position in terminal buffer
+function M.get_stacktrace_at_cursor()
+  local buf = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local line = cursor[1]
+  return stacktrace.find_nearest_metadata(buf, line)
+end
+
+-- Jump to file referenced in stack trace at cursor
+function M.goto_stacktrace()
+  local file_info = M.get_stacktrace_at_cursor()
+  if file_info and file_info.path then
+    -- Check if file exists
+    if vim.fn.filereadable(file_info.path) == 1 then
+      -- If the current window is a floating terminal, close it first and find
+      -- a regular (non-floating) window to open the file in.
+      local current_win = vim.api.nvim_get_current_win()
+      local win_config = vim.api.nvim_win_get_config(current_win)
+      if win_config.relative and win_config.relative ~= "" then
+        -- We're in a floating window — close it
+        vim.api.nvim_win_close(current_win, true)
+        -- Try to find a non-floating window to switch to
+        local found_regular_win = false
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          local wc = vim.api.nvim_win_get_config(win)
+          if (not wc.relative or wc.relative == "") and vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_set_current_win(win)
+            found_regular_win = true
+            break
+          end
+        end
+        if not found_regular_win then
+          -- No regular window found, create a new split
+          vim.cmd("new")
+        end
+      end
+
+      vim.cmd("edit " .. vim.fn.fnameescape(file_info.path))
+      if file_info.line then
+        vim.api.nvim_win_set_cursor(0, { file_info.line, (file_info.column or 1) - 1 })
+      end
+      return true
+    else
+      vim.notify("File not found: " .. file_info.path, vim.log.levels.WARN)
+      return false
+    end
+  end
+  vim.notify("No stack trace reference found at cursor", vim.log.levels.INFO)
+  return false
 end
 
 return M
