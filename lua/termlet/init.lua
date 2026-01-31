@@ -6,6 +6,9 @@ local menu = require("termlet.menu")
 -- Load stacktrace module
 local stacktrace = require("termlet.stacktrace")
 
+-- Load keybindings module
+local keybindings = require("termlet.keybindings")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -267,6 +270,7 @@ function M.create_floating_terminal(opts)
     name = name,
     term_config = term_config,
   }
+
 
   -- Auto-cleanup on window close
   vim.api.nvim_create_autocmd("WinClosed", {
@@ -547,6 +551,42 @@ local function execute_script(script)
   return true
 end
 
+-- Track previously applied keybindings so they can be removed on reapply
+local applied_keybindings = {} -- { key = script_name }
+
+-- Apply keybindings from saved configuration
+local function apply_keybindings()
+  -- Remove previously applied keybindings
+  for key, _ in pairs(applied_keybindings) do
+    pcall(vim.keymap.del, "n", key)
+    debug_log("Removed old keybinding: " .. key)
+  end
+  applied_keybindings = {}
+
+  local saved_keybindings = keybindings.get_keybindings()
+
+  for _, script in ipairs(config.scripts) do
+    local key = saved_keybindings[script.name]
+    if key and key ~= "" then
+      -- Create keybinding for this script
+      local function_name = "run_" .. script.name:gsub("[%s%-%.]", "_"):lower()
+      local run_func = M[function_name]
+
+      if run_func then
+        pcall(function()
+          vim.keymap.set("n", key, run_func, {
+            noremap = true,
+            silent = true,
+            desc = "TermLet: " .. (script.description or script.name),
+          })
+        end)
+        applied_keybindings[key] = script.name
+        debug_log("Applied keybinding " .. key .. " for script: " .. script.name)
+      end
+    end
+  end
+end
+
 -- Improved setup function with validation
 function M.setup(user_config)
   -- Validate and merge configuration
@@ -557,12 +597,13 @@ function M.setup(user_config)
   -- Initialize stacktrace module with configuration
   stacktrace.setup(config.stacktrace)
 
+
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
     vim.notify("Invalid scripts configuration", vim.log.levels.ERROR)
     return
   end
-  
+
   -- Create functions for each script
   for i, script in ipairs(config.scripts) do
     -- Validate script configuration
@@ -570,39 +611,45 @@ function M.setup(user_config)
       vim.notify("Script " .. i .. " missing required field: name", vim.log.levels.WARN)
       goto continue
     end
-    
+
     -- Use global root_dir if script doesn't specify one
     if not script.root_dir and config.root_dir then
       script.root_dir = config.root_dir
     end
-    
+
     -- Check for valid configuration method
     local has_filename = script.filename
     local has_legacy = script.dir_name and script.relative_path
-    
+
     if not has_filename and not has_legacy then
       vim.notify("Script '" .. script.name .. "' must specify either 'filename' (with optional 'root_dir') or both 'dir_name' and 'relative_path'", vim.log.levels.WARN)
       goto continue
     end
-    
+
     -- Create sanitized function name
     local function_name = "run_" .. script.name:gsub("[%s%-%.]", "_"):lower()
-    
+
     -- Ensure function name is valid
     if not function_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
       vim.notify("Invalid function name generated for script: " .. script.name, vim.log.levels.WARN)
       goto continue
     end
-    
+
     -- Create the function
     M[function_name] = function()
       return execute_script(script)
     end
-    
+
     debug_log("Created function: " .. function_name .. " for script: " .. script.name)
-    
+
     ::continue::
   end
+
+  -- Initialize keybindings module with scripts
+  keybindings.init(config.scripts)
+
+  -- Apply saved keybindings
+  apply_keybindings()
 end
 
 -- Utility function to close all active terminals
@@ -753,6 +800,71 @@ function M.goto_stacktrace()
   end
   vim.notify("No stack trace reference found at cursor", vim.log.levels.INFO)
   return false
+end
+
+-- ============================================================================
+-- Keybinding Management API
+-- ============================================================================
+
+--- Open the keybinding configuration UI
+---@return boolean Success
+function M.open_keybindings()
+  if not config.scripts or #config.scripts == 0 then
+    vim.notify("No scripts configured", vim.log.levels.INFO)
+    return false
+  end
+
+  return keybindings.open(config.scripts, function(new_keybindings)
+    -- Re-apply keybindings when saved
+    apply_keybindings()
+  end, config.keybindings)
+end
+
+--- Close the keybinding configuration UI
+function M.close_keybindings()
+  keybindings.close()
+end
+
+--- Check if keybindings UI is currently open
+---@return boolean
+function M.is_keybindings_open()
+  return keybindings.is_open()
+end
+
+--- Toggle the keybindings UI open/closed
+function M.toggle_keybindings()
+  if keybindings.is_open() then
+    keybindings.close()
+  else
+    M.open_keybindings()
+  end
+end
+
+--- Set a keybinding for a script programmatically
+---@param script_name string Name of the script
+---@param key string|nil Keybinding to set (nil to clear)
+---@return boolean Success
+function M.set_keybinding(script_name, key)
+  local result = keybindings.set_keybinding(script_name, key)
+  if result then
+    -- Re-apply keybindings after change
+    apply_keybindings()
+  end
+  return result
+end
+
+--- Clear a keybinding for a script
+---@param script_name string Name of the script
+function M.clear_keybinding(script_name)
+  keybindings.clear_keybinding(script_name)
+  -- Re-apply keybindings after change (to remove the old one)
+  apply_keybindings()
+end
+
+--- Get all current keybindings
+---@return table Map of script_name -> keybinding
+function M.get_keybindings()
+  return keybindings.get_keybindings()
 end
 
 return M

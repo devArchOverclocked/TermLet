@@ -10,6 +10,7 @@
 * 🧭 **Auto-discover script paths** from flexible search logic
 * 🪟 **Floating terminal windows** with customizable size, borders, and position
 * 🎨 **Interactive script menu** - Mason-like popup for browsing and executing scripts
+* ⌨️ **Visual keybinding configuration** - Configure keybindings interactively without editing config files
 * 🔀 **Dynamic function generation** for each script (e.g. `:lua require('termlet').run_my_script()`)
 * 😹 **Terminal cleanup** and safe resource handling
 * 🔍 **Stack trace detection** — automatically detect file references in error output and jump to source
@@ -249,6 +250,94 @@ Additional utility methods:
 * `require("termlet").is_menu_open()` – check if menu is currently open
 * `require("termlet").close_all_terminals()` – close all terminals
 * `require("termlet").close_terminal()` – close the current or last terminal
+
+---
+
+## ⌨️ Visual Keybinding Configuration
+
+TermLet provides an interactive interface for configuring keybindings for your scripts without editing config files.
+
+### Opening the Keybindings Manager
+
+```lua
+vim.keymap.set("n", "<leader>tk", function()
+  require("termlet").open_keybindings()
+end, { desc = "Open TermLet Keybindings" })
+
+-- Or use toggle to open/close with the same key
+vim.keymap.set("n", "<leader>tk", function()
+  require("termlet").toggle_keybindings()
+end, { desc = "Toggle TermLet Keybindings" })
+```
+
+The keybindings manager displays all configured scripts with their assigned keybindings:
+
+```
+╭─ TermLet Keybindings ─────────────────────╮
+│                                            │
+│    Script          Keybinding    Action   │
+│    ──────────────────────────────────────  │
+│  > build           <leader>b     [Change]  │
+│    test            <leader>t     [Change]  │
+│    deploy          (not set)     [Set]     │
+│    lint            <leader>l     [Change]  │
+│                                            │
+│ [c] Capture  [i] Type  [d] Delete  [q]    │
+╰────────────────────────────────────────────╯
+```
+
+### Keybindings Manager Controls
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `gg` | Go to first script |
+| `G` | Go to last script |
+| `c` / `Enter` | Capture keybinding (real-time key capture) |
+| `i` | Type keybinding notation (e.g., `<leader>b`) |
+| `d` | Delete keybinding |
+| `Esc` | Cancel / Close |
+| `q` | Close manager |
+| `?` | Toggle help |
+
+### Setting Keybindings
+
+**Method 1: Real-time Capture (c / Enter)**
+
+Press `c` or `Enter` to enter capture mode, then press the key combination you want to use. Keys are captured in real-time and displayed immediately. Press `Enter` to confirm or `Esc` to cancel.
+
+**Method 2: Type Notation (i)**
+
+Press `i` to enter input mode, then type the keybinding notation directly (e.g., `<leader>b`, `<C-k>`, `<A-j>`). Press `Enter` to confirm or `Esc` to cancel.
+
+### Features
+
+- **Persistence**: Keybindings are automatically saved to `~/.local/share/nvim/termlet-keybindings.json` and loaded on startup
+- **Conflict Detection**: Warns when a keybinding is already assigned to another script
+- **Auto-apply**: Keybindings are applied immediately and persisted across Neovim sessions
+- **Real-time Capture**: Captures multi-key sequences and special keys like `<leader>`, `<C-x>`, etc.
+
+### Programmatic API
+
+You can also manage keybindings programmatically:
+
+```lua
+-- Set a keybinding
+require("termlet").set_keybinding("build", "<leader>b")
+
+-- Clear a keybinding
+require("termlet").clear_keybinding("build")
+
+-- Get all keybindings
+local bindings = require("termlet").get_keybindings()
+print(bindings["build"]) -- "<leader>b"
+
+-- Open/close/toggle the UI
+require("termlet").open_keybindings()
+require("termlet").close_keybindings()
+require("termlet").toggle_keybindings()
+```
 
 ---
 

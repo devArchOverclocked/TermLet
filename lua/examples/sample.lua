@@ -96,6 +96,19 @@ return {
 				end,
 				desc = "Open TermLet Script Menu",
 			},
+			-- Keybinding configuration UI
+			-- Opens a visual interface to set/change keybindings for scripts.
+			-- Two modes are available:
+			--   [c] Capture mode: Press keys in real-time to record a sequence
+			--   [i] Input mode:   Type vim notation directly (e.g. <leader>b)
+			-- Keybindings persist across Neovim sessions automatically.
+			{
+				"<leader>tk",
+				function()
+					require("termlet").toggle_keybindings()
+				end,
+				desc = "TermLet: Toggle Keybinding Config",
+			},
 		},
 	},
 }
