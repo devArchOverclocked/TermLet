@@ -29,6 +29,8 @@ local config = {
       success = "✓",
       error = "✗",
     },
+    output_persistence = "none", -- "none" | "buffer"
+    max_saved_buffers = 5,       -- Maximum number of hidden buffers to keep
   },
   search = {
     exclude_dirs = {
@@ -68,6 +70,9 @@ local config = {
 
 -- Store active terminal windows for cleanup
 local active_terminals = {}
+
+-- Store saved terminal buffers for output persistence
+local saved_buffers = {}
 
 -- Literal string replacement to avoid Lua pattern issues with special chars
 -- Replaces ALL occurrences of placeholder in str
@@ -256,8 +261,12 @@ function M.create_floating_terminal(opts)
       { win = win })
   end
 
-  -- Set buffer options
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  -- Set buffer options based on output_persistence setting
+  local bufhidden_value = "wipe"
+  if term_config.output_persistence == "buffer" then
+    bufhidden_value = "hide"
+  end
+  vim.api.nvim_set_option_value("bufhidden", bufhidden_value, { buf = buf })
   vim.api.nvim_set_option_value("filetype", "terminal", { buf = buf })
   vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
   -- Store reference for cleanup (table for status title updates)
@@ -272,6 +281,25 @@ function M.create_floating_terminal(opts)
     pattern = tostring(win),
     callback = function()
       active_terminals[win] = nil
+
+      -- Handle output persistence
+      if term_config.output_persistence == "buffer" and vim.api.nvim_buf_is_valid(buf) then
+        -- Save buffer metadata for later retrieval
+        table.insert(saved_buffers, 1, {
+          buf = buf,
+          name = name,
+          timestamp = os.time(),
+        })
+
+        -- Enforce max_saved_buffers limit
+        local max_buffers = term_config.max_saved_buffers or 5
+        while #saved_buffers > max_buffers do
+          local old_entry = table.remove(saved_buffers)
+          if old_entry and old_entry.buf and vim.api.nvim_buf_is_valid(old_entry.buf) then
+            vim.api.nvim_buf_delete(old_entry.buf, { force = true })
+          end
+        end
+      end
     end,
     once = true,
   })
@@ -726,6 +754,149 @@ function M.goto_stacktrace()
   end
   vim.notify("No stack trace reference found at cursor", vim.log.levels.INFO)
   return false
+end
+
+-- Show output from the most recently saved terminal buffer
+function M.show_last_output()
+  if #saved_buffers == 0 then
+    vim.notify("No saved terminal outputs available", vim.log.levels.INFO)
+    return false
+  end
+
+  -- Find the first valid saved buffer
+  local saved_entry = nil
+  for i, entry in ipairs(saved_buffers) do
+    if entry.buf and vim.api.nvim_buf_is_valid(entry.buf) then
+      saved_entry = entry
+      break
+    else
+      -- Remove invalid entry
+      table.remove(saved_buffers, i)
+    end
+  end
+
+  if not saved_entry then
+    vim.notify("No saved terminal outputs available", vim.log.levels.INFO)
+    return false
+  end
+
+  -- Create a new floating window to display the saved buffer
+  local term_config = vim.tbl_deep_extend("force", config.terminal, {})
+
+  -- Calculate dimensions
+  local height = math.floor(vim.o.lines * term_config.height_ratio)
+  local width = math.floor(vim.o.columns * term_config.width_ratio)
+
+  -- Calculate position
+  local row
+  if term_config.position == "center" then
+    row = math.floor((vim.o.lines - height) / 2)
+  elseif term_config.position == "top" then
+    row = 1
+  else -- bottom
+    row = vim.o.lines - height - 2
+  end
+
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  -- Format title with timestamp
+  local timestamp = os.date("%H:%M:%S", saved_entry.timestamp)
+  local title = " " .. (saved_entry.name or "Terminal") .. " (" .. timestamp .. ") "
+
+  local win_opts = {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    anchor = "NW",
+    style = "minimal",
+    border = term_config.border,
+    title = title,
+    title_pos = term_config.title_pos or "center",
+  }
+
+  local win = vim.api.nvim_open_win(saved_entry.buf, true, win_opts)
+  if not win then
+    vim.notify("Failed to open saved output window", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Apply highlights
+  local highlights = term_config.highlights
+  if highlights then
+    vim.api.nvim_set_option_value("winhighlight",
+      "Normal:" .. (highlights.background or "NormalFloat") ..
+      ",FloatBorder:" .. (highlights.border or "FloatBorder") ..
+      ",FloatTitle:" .. (highlights.title or "Title"),
+      { win = win })
+  end
+
+  return true
+end
+
+-- List all saved terminal outputs
+function M.list_outputs()
+  if #saved_buffers == 0 then
+    vim.notify("No saved terminal outputs", vim.log.levels.INFO)
+    return {}
+  end
+
+  -- Clean up invalid buffers and build list
+  local valid_outputs = {}
+  local i = 1
+  while i <= #saved_buffers do
+    local entry = saved_buffers[i]
+    if entry.buf and vim.api.nvim_buf_is_valid(entry.buf) then
+      local timestamp = os.date("%Y-%m-%d %H:%M:%S", entry.timestamp)
+      local line_count = vim.api.nvim_buf_line_count(entry.buf)
+      table.insert(valid_outputs, {
+        name = entry.name,
+        timestamp = timestamp,
+        lines = line_count,
+        buffer = entry.buf,
+      })
+      i = i + 1
+    else
+      table.remove(saved_buffers, i)
+    end
+  end
+
+  if #valid_outputs == 0 then
+    vim.notify("No saved terminal outputs", vim.log.levels.INFO)
+    return {}
+  end
+
+  -- Format and display the list
+  local output_list = {}
+  for idx, output in ipairs(valid_outputs) do
+    table.insert(output_list,
+      idx .. ". " .. output.name .. " - " .. output.timestamp .. " (" .. output.lines .. " lines)")
+  end
+
+  vim.notify("Saved terminal outputs:\n" .. table.concat(output_list, "\n"), vim.log.levels.INFO)
+  return valid_outputs
+end
+
+-- Clear all saved terminal outputs
+function M.clear_outputs()
+  local count = 0
+  for _, entry in ipairs(saved_buffers) do
+    if entry.buf and vim.api.nvim_buf_is_valid(entry.buf) then
+      vim.api.nvim_buf_delete(entry.buf, { force = true })
+      count = count + 1
+    end
+  end
+
+  saved_buffers = {}
+
+  if count > 0 then
+    vim.notify("Cleared " .. count .. " saved terminal output(s)", vim.log.levels.INFO)
+  else
+    vim.notify("No saved terminal outputs to clear", vim.log.levels.INFO)
+  end
+
+  return count
 end
 
 return M
