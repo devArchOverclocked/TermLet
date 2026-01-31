@@ -178,6 +178,47 @@ end
 M._should_exclude_dir = should_exclude_dir
 M._should_exclude_file = should_exclude_file
 
+-- Compute floating window geometry and build nvim_open_win options table
+local function compute_win_opts(term_config, title)
+  local height = math.floor(vim.o.lines * term_config.height_ratio)
+  local width = math.floor(vim.o.columns * term_config.width_ratio)
+
+  local row
+  if term_config.position == "center" then
+    row = math.floor((vim.o.lines - height) / 2)
+  elseif term_config.position == "top" then
+    row = 1
+  else -- bottom (default)
+    row = vim.o.lines - height - 2
+  end
+
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  return {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    anchor = "NW",
+    style = "minimal",
+    border = term_config.border,
+    title = title,
+    title_pos = term_config.title_pos or "center",
+  }
+end
+
+-- Apply winhighlight groups to a window
+local function apply_win_highlights(win, highlights)
+  if highlights then
+    vim.api.nvim_set_option_value("winhighlight",
+      "Normal:" .. (highlights.background or "NormalFloat") ..
+      ",FloatBorder:" .. (highlights.border or "FloatBorder") ..
+      ",FloatTitle:" .. (highlights.title or "Title"),
+      { win = win })
+  end
+end
+
 -- Improved terminal window creation with better error handling
 function M.create_floating_terminal(opts)
   opts = opts or {}
@@ -203,46 +244,19 @@ function M.create_floating_terminal(opts)
     term_config.border = "rounded"
   end
 
-  -- Calculate dimensions
-  local height = math.floor(vim.o.lines * term_config.height_ratio)
-  local width = math.floor(vim.o.columns * term_config.width_ratio)
-  
-  -- Calculate position based on preference
-  local row
-  if term_config.position == "center" then
-    row = math.floor((vim.o.lines - height) / 2)
-  elseif term_config.position == "top" then
-    row = 1
-  else -- bottom (default)
-    row = vim.o.lines - height - 2
-  end
-  
-  local col = math.floor((vim.o.columns - width) / 2)
-  
   -- Create buffer and window
   local buf = vim.api.nvim_create_buf(false, true)
   if not buf then
     vim.notify("Failed to create terminal buffer", vim.log.levels.ERROR)
     return nil
   end
-  
+
   -- Build formatted title
   local name = opts.title or "Terminal"
   local initial_status = term_config.show_status and "running" or nil
   local title = format_terminal_title(term_config, name, initial_status)
 
-  local win_opts = {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    anchor = "NW",
-    style = "minimal",
-    border = term_config.border,
-    title = title,
-    title_pos = term_config.title_pos or "center",
-  }
+  local win_opts = compute_win_opts(term_config, title)
 
   local win = vim.api.nvim_open_win(buf, true, win_opts)
   if not win then
@@ -252,14 +266,7 @@ function M.create_floating_terminal(opts)
   end
 
   -- Apply highlight groups
-  local highlights = term_config.highlights
-  if highlights then
-    vim.api.nvim_set_option_value("winhighlight",
-      "Normal:" .. (highlights.background or "NormalFloat") ..
-      ",FloatBorder:" .. (highlights.border or "FloatBorder") ..
-      ",FloatTitle:" .. (highlights.title or "Title"),
-      { win = win })
-  end
+  apply_win_highlights(win, term_config.highlights)
 
   -- Set buffer options based on output_persistence setting
   local bufhidden_value = "wipe"
@@ -555,6 +562,22 @@ function M.setup(user_config)
     config = vim.tbl_deep_extend("force", config, user_config)
   end
 
+  -- Validate output_persistence config value
+  local valid_persistence = { none = true, buffer = true }
+  if config.terminal.output_persistence
+      and not valid_persistence[config.terminal.output_persistence] then
+    vim.notify(
+      "[TermLet] Invalid output_persistence '" .. tostring(config.terminal.output_persistence)
+        .. "', falling back to 'none'. Valid values: none, buffer",
+      vim.log.levels.WARN)
+    config.terminal.output_persistence = "none"
+  end
+
+  -- Clean up saved buffers if output_persistence changed to "none"
+  if config.terminal.output_persistence == "none" and #saved_buffers > 0 then
+    M.clear_outputs()
+  end
+
   -- Initialize stacktrace module with configuration
   stacktrace.setup(config.stacktrace)
 
@@ -763,15 +786,18 @@ function M.show_last_output()
     return false
   end
 
-  -- Find the first valid saved buffer
+  -- Find the first valid saved buffer (use while loop to avoid
+  -- iterator invalidation when removing entries during traversal)
   local saved_entry = nil
-  for i, entry in ipairs(saved_buffers) do
+  local i = 1
+  while i <= #saved_buffers do
+    local entry = saved_buffers[i]
     if entry.buf and vim.api.nvim_buf_is_valid(entry.buf) then
       saved_entry = entry
       break
     else
-      -- Remove invalid entry
       table.remove(saved_buffers, i)
+      -- don't increment i, next entry is now at same index
     end
   end
 
@@ -783,38 +809,11 @@ function M.show_last_output()
   -- Create a new floating window to display the saved buffer
   local term_config = vim.tbl_deep_extend("force", config.terminal, {})
 
-  -- Calculate dimensions
-  local height = math.floor(vim.o.lines * term_config.height_ratio)
-  local width = math.floor(vim.o.columns * term_config.width_ratio)
-
-  -- Calculate position
-  local row
-  if term_config.position == "center" then
-    row = math.floor((vim.o.lines - height) / 2)
-  elseif term_config.position == "top" then
-    row = 1
-  else -- bottom
-    row = vim.o.lines - height - 2
-  end
-
-  local col = math.floor((vim.o.columns - width) / 2)
-
   -- Format title with timestamp
   local timestamp = os.date("%H:%M:%S", saved_entry.timestamp)
   local title = " " .. (saved_entry.name or "Terminal") .. " (" .. timestamp .. ") "
 
-  local win_opts = {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    anchor = "NW",
-    style = "minimal",
-    border = term_config.border,
-    title = title,
-    title_pos = term_config.title_pos or "center",
-  }
+  local win_opts = compute_win_opts(term_config, title)
 
   local win = vim.api.nvim_open_win(saved_entry.buf, true, win_opts)
   if not win then
@@ -823,16 +822,20 @@ function M.show_last_output()
   end
 
   -- Apply highlights
-  local highlights = term_config.highlights
-  if highlights then
-    vim.api.nvim_set_option_value("winhighlight",
-      "Normal:" .. (highlights.background or "NormalFloat") ..
-      ",FloatBorder:" .. (highlights.border or "FloatBorder") ..
-      ",FloatTitle:" .. (highlights.title or "Title"),
-      { win = win })
-  end
+  apply_win_highlights(win, term_config.highlights)
 
-  return true
+  -- Set bufhidden to wipe so closing this viewer deletes the buffer
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = saved_entry.buf })
+
+  -- Add q keymap to close the output viewer window
+  vim.api.nvim_buf_set_keymap(saved_entry.buf, "n", "q", "",
+    { noremap = true, silent = true, callback = function()
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+    end })
+
+  return true, win
 end
 
 -- List all saved terminal outputs
