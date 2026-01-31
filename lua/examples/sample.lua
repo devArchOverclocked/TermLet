@@ -5,9 +5,10 @@ return {
 		opts = {
 			root_dir = "~/Path/To/Files/", -- Global root for all scripts
 			scripts = {
+				-- Plain filename: TermLet searches recursively from root_dir
 				{
 					name = "build",
-					filename = "build", -- Just the filename!
+					filename = "build.sh",
 					-- Optional: specify custom search directories
 					search_dirs = { ".", "Path", "To", "Files" },
 				},
@@ -18,6 +19,18 @@ return {
 				{
 					name = "test",
 					filename = "test",
+				},
+				-- Absolute path: runs a script outside of root_dir
+				{
+					name = "deploy",
+					filename = "~/scripts/deploy.sh",
+				},
+				-- Relative path with subdirectory: resolved from root_dir,
+				-- falls back to recursive basename search if not found
+				{
+					name = "lint",
+					filename = "ci/lint.sh",
+					root_dir = "~/my-project",
 				},
 			},
 			terminal = {
