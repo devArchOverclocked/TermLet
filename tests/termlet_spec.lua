@@ -737,4 +737,350 @@ describe("termlet", function()
       assert.is_table(win_config.border)
     end)
   end)
+
+  describe("should_exclude_dir", function()
+    it("should exclude hidden directories when exclude_hidden is true", function()
+      termlet.setup({ scripts = {} })
+      local search_config = { exclude_hidden = true, exclude_dirs = {} }
+      assert.is_true(termlet._should_exclude_dir(".git", search_config))
+      assert.is_true(termlet._should_exclude_dir(".cache", search_config))
+      assert.is_true(termlet._should_exclude_dir(".hidden", search_config))
+    end)
+
+    it("should not exclude hidden directories when exclude_hidden is false", function()
+      termlet.setup({ scripts = {} })
+      local search_config = { exclude_hidden = false, exclude_dirs = {} }
+      assert.is_false(termlet._should_exclude_dir(".git", search_config))
+      assert.is_false(termlet._should_exclude_dir(".cache", search_config))
+    end)
+
+    it("should exclude directories in exclude_dirs list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_hidden = false,
+        exclude_dirs = { "node_modules", "dist", "build" },
+      }
+      assert.is_true(termlet._should_exclude_dir("node_modules", search_config))
+      assert.is_true(termlet._should_exclude_dir("dist", search_config))
+      assert.is_true(termlet._should_exclude_dir("build", search_config))
+    end)
+
+    it("should not exclude directories not in the list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_hidden = false,
+        exclude_dirs = { "node_modules" },
+      }
+      assert.is_false(termlet._should_exclude_dir("src", search_config))
+      assert.is_false(termlet._should_exclude_dir("scripts", search_config))
+      assert.is_false(termlet._should_exclude_dir("lib", search_config))
+    end)
+
+    it("should handle empty exclude_dirs list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = { exclude_hidden = false, exclude_dirs = {} }
+      assert.is_false(termlet._should_exclude_dir("node_modules", search_config))
+      assert.is_false(termlet._should_exclude_dir("anything", search_config))
+    end)
+
+    it("should combine hidden and explicit exclusions", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_hidden = true,
+        exclude_dirs = { "node_modules", "vendor" },
+      }
+      -- Hidden dir excluded by exclude_hidden
+      assert.is_true(termlet._should_exclude_dir(".secret", search_config))
+      -- Explicit dir excluded by list
+      assert.is_true(termlet._should_exclude_dir("node_modules", search_config))
+      assert.is_true(termlet._should_exclude_dir("vendor", search_config))
+      -- Not excluded
+      assert.is_false(termlet._should_exclude_dir("src", search_config))
+    end)
+
+    it("should use default config when search_config is nil", function()
+      termlet.setup({ scripts = {} })
+      -- Uses defaults: exclude_hidden=true and the default exclude_dirs list
+      assert.is_true(termlet._should_exclude_dir(".git", nil))
+      assert.is_true(termlet._should_exclude_dir("node_modules", nil))
+      assert.is_false(termlet._should_exclude_dir("src", nil))
+    end)
+
+    it("should exclude all default directories", function()
+      termlet.setup({ scripts = {} })
+      local defaults = {
+        "node_modules", ".git", ".svn", ".hg", "dist", "build",
+        "target", "__pycache__", ".cache", ".tox", ".mypy_cache",
+        ".pytest_cache", "vendor", "venv", ".venv", "env",
+      }
+      for _, dir in ipairs(defaults) do
+        assert.is_true(termlet._should_exclude_dir(dir, nil),
+          "Expected '" .. dir .. "' to be excluded by defaults")
+      end
+    end)
+  end)
+
+  describe("should_exclude_file", function()
+    it("should exclude files matching glob patterns", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.min.*" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("app.min.js", search_config))
+      assert.is_true(termlet._should_exclude_file("styles.min.css", search_config))
+    end)
+
+    it("should not exclude files that do not match patterns", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.min.*" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_false(termlet._should_exclude_file("app.js", search_config))
+      assert.is_false(termlet._should_exclude_file("build.sh", search_config))
+    end)
+
+    it("should handle multiple patterns", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.min.*", "*.bundle.*", "*.bak" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("app.min.js", search_config))
+      assert.is_true(termlet._should_exclude_file("vendor.bundle.js", search_config))
+      assert.is_true(termlet._should_exclude_file("data.bak", search_config))
+      assert.is_false(termlet._should_exclude_file("main.lua", search_config))
+    end)
+
+    it("should handle empty patterns list", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = {},
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_false(termlet._should_exclude_file("anything.js", search_config))
+    end)
+
+    it("should support ? wildcard for single character", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "test?.lua" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("test1.lua", search_config))
+      assert.is_true(termlet._should_exclude_file("testA.lua", search_config))
+      assert.is_false(termlet._should_exclude_file("test12.lua", search_config))
+      assert.is_false(termlet._should_exclude_file("test.lua", search_config))
+    end)
+
+    it("should use default config when search_config is nil", function()
+      -- Default has empty exclude_patterns, so nothing should be excluded
+      termlet.setup({ scripts = {} })
+      assert.is_false(termlet._should_exclude_file("anything.js", nil))
+    end)
+
+    it("should handle glob patterns containing Lua metacharacters", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "*.log+", "file[1].txt", "foo(bar).js" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      -- Literal + in pattern should match literal +
+      assert.is_true(termlet._should_exclude_file("app.log+", search_config))
+      assert.is_false(termlet._should_exclude_file("app.logg", search_config))
+      -- Literal brackets should match literally
+      assert.is_true(termlet._should_exclude_file("file[1].txt", search_config))
+      assert.is_false(termlet._should_exclude_file("file2.txt", search_config))
+      -- Literal parentheses should match literally
+      assert.is_true(termlet._should_exclude_file("foo(bar).js", search_config))
+      assert.is_false(termlet._should_exclude_file("foobar.js", search_config))
+    end)
+
+    it("should handle glob patterns with - and ^ characters", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "my-file.*", "^start.txt" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("my-file.js", search_config))
+      assert.is_true(termlet._should_exclude_file("^start.txt", search_config))
+      assert.is_false(termlet._should_exclude_file("myXfile.js", search_config))
+    end)
+
+    it("should handle glob patterns with % character", function()
+      termlet.setup({ scripts = {} })
+      local search_config = {
+        exclude_patterns = { "100%.txt" },
+        exclude_dirs = {},
+        exclude_hidden = false,
+      }
+      assert.is_true(termlet._should_exclude_file("100%.txt", search_config))
+      assert.is_false(termlet._should_exclude_file("100X.txt", search_config))
+    end)
+  end)
+
+  describe("search configuration", function()
+    it("should accept custom search config in setup", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "custom_dir", "another_dir" },
+          exclude_hidden = false,
+          exclude_patterns = { "*.tmp" },
+        },
+      })
+      -- Should not error
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should merge search config with defaults", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_hidden = false,
+        },
+      })
+      -- After deep merge, exclude_hidden should be false
+      -- but exclude_dirs should still have defaults
+      assert.is_not_nil(termlet)
+      -- Verify by testing the function with nil (uses internal config)
+      -- exclude_hidden was set to false, so hidden dirs are NOT excluded
+      assert.is_false(termlet._should_exclude_dir(".hidden_dir", nil))
+      -- But explicit dirs from default list should still be excluded
+      assert.is_true(termlet._should_exclude_dir("node_modules", nil))
+    end)
+
+    it("should allow replacing exclude_dirs entirely", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "only_this" },
+        },
+      })
+      assert.is_true(termlet._should_exclude_dir("only_this", nil))
+      -- Default dirs like node_modules should no longer be excluded
+      -- because tbl_deep_extend replaces the list
+      assert.is_false(termlet._should_exclude_dir("node_modules", nil))
+    end)
+
+    it("should allow adding exclude_patterns", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_patterns = { "*.min.*", "*.bundle.*" },
+        },
+      })
+      assert.is_true(termlet._should_exclude_file("app.min.js", nil))
+      assert.is_true(termlet._should_exclude_file("vendor.bundle.js", nil))
+      assert.is_false(termlet._should_exclude_file("app.js", nil))
+    end)
+  end)
+
+  describe("find_script_by_name file exclusion integration", function()
+    local tmpdir
+
+    before_each(function()
+      tmpdir = vim.fn.tempname()
+      vim.fn.mkdir(tmpdir, "p")
+    end)
+
+    after_each(function()
+      vim.fn.delete(tmpdir, "rf")
+    end)
+
+    it("should skip files matching exclude_patterns", function()
+      -- Create a script file that matches an exclusion pattern
+      local script_path = tmpdir .. "/build.min.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = {},
+          exclude_hidden = false,
+          exclude_patterns = { "*.min.*" },
+        },
+      })
+
+      local result = termlet.find_script_by_name("build.min.sh", tmpdir, { "." })
+      assert.is_nil(result)
+    end)
+
+    it("should find files not matching exclude_patterns", function()
+      -- Create a script file that does NOT match any exclusion pattern
+      local script_path = tmpdir .. "/build.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = {},
+          exclude_hidden = false,
+          exclude_patterns = { "*.min.*" },
+        },
+      })
+
+      local result = termlet.find_script_by_name("build.sh", tmpdir, { "." })
+      assert.is_not_nil(result)
+      assert.is_truthy(result:find("build.sh", 1, true))
+    end)
+
+    it("should skip files in excluded directories", function()
+      -- Create a subdirectory that should be excluded and put a script in it
+      local excluded_dir = tmpdir .. "/node_modules"
+      vim.fn.mkdir(excluded_dir, "p")
+      local script_path = excluded_dir .. "/run.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "node_modules" },
+          exclude_hidden = false,
+          exclude_patterns = {},
+        },
+      })
+
+      -- Search should not find the file inside excluded directory
+      local result = termlet.find_script_by_name("run.sh", tmpdir, { "." })
+      assert.is_nil(result)
+    end)
+
+    it("should find files in non-excluded directories", function()
+      -- Create a subdirectory that is NOT excluded and put a script in it
+      local scripts_dir = tmpdir .. "/scripts"
+      vim.fn.mkdir(scripts_dir, "p")
+      local script_path = scripts_dir .. "/run.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho hello\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = { "node_modules" },
+          exclude_hidden = false,
+          exclude_patterns = {},
+        },
+      })
+
+      local result = termlet.find_script_by_name("run.sh", tmpdir, { "scripts" })
+      assert.is_not_nil(result)
+      assert.is_truthy(result:find("run.sh", 1, true))
+    end)
+  end)
 end)

@@ -12,6 +12,7 @@
 * 🎨 **Interactive script menu** - Mason-like popup for browsing and executing scripts
 * 🔀 **Dynamic function generation** for each script (e.g. `:lua require('termlet').run_my_script()`)
 * 😹 **Terminal cleanup** and safe resource handling
+* 🔍 **Stack trace detection** — automatically detect file references in error output and jump to source
 * 🧪 **Debug-friendly** with verbose logging option
 
 ---
@@ -44,7 +45,7 @@ use {
 }
 ```
 
-Using [lazy.nvim](https://github.com/LazyVim/LazyVim):
+Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "devArchOverclocked/termlet",
@@ -92,10 +93,11 @@ Here's the full configuration structure:
     title = " TermLet Scripts " -- Menu window title
   },
   stacktrace = {
-    enabled = false,                    -- Enable stack trace parsing
-    languages = { 'python', 'csharp' }, -- Built-in parsers to load
+    enabled = true,                     -- Enable stack trace detection
+    languages = { 'python', 'csharp' }, -- Built-in parsers to load (empty = all)
     custom_parsers = {},                -- Custom parser definitions
     parser_order = { 'custom', 'builtin' }, -- Parser priority
+    buffer_size = 50,                   -- Lines kept in buffer for multi-line detection
   },
   debug = false,        -- Enable verbose debug logging
 }
@@ -219,32 +221,62 @@ Additional utility methods:
 
 ---
 
-## 🔍 Stack Trace Parser Plugin System
+## 🔍 Stack Trace Detection
 
-TermLet includes an extensible stack trace parser plugin architecture that allows parsing stack traces from multiple programming languages.
+TermLet automatically detects file references in terminal error output. When a script produces a stack trace or compiler error, you can jump directly to the source location.
+
+### Supported Languages
+
+TermLet includes built-in parsers for:
+- **Python** - Standard tracebacks, pytest format
+- **C#** - .NET stack traces, MSBuild errors
+- **JavaScript/TypeScript** - Node.js, browser, webpack formats
+- **Java** - Standard stack traces, compiler errors
+- **Go** - Panic and error traces
+- **Rust** - Compiler errors and backtraces
+- **Ruby** - Exception traces
+- **Lua** - Error messages
+- **C/C++** - Compiler errors
+- **PHP, Perl, Elixir, Erlang, Swift, Kotlin, Haskell**
 
 ### Quick Start
 
-Enable stack trace parsing for Python and C#:
+Enable stack trace parsing for specific languages:
 
 ```lua
 require("termlet").setup({
   stacktrace = {
     enabled = true,
-    languages = { 'python', 'csharp' },
+    languages = { 'python', 'csharp' }, -- empty = all languages
   }
 })
 ```
 
-### Built-in Language Support
+### Usage
 
-TermLet includes parsers for:
-- **Python** - Standard tracebacks, pytest format
-- **C#** - .NET stack traces, MSBuild errors
-- **JavaScript** - Node.js, browser, webpack formats
-- **Java** - Standard stack traces, compiler errors
+Add a keybinding to jump to the nearest stack trace reference:
 
-### Using the Parser API
+```lua
+vim.keymap.set("n", "<leader>tg", function()
+  require("termlet").goto_stacktrace()
+end, { desc = "Go to stack trace file" })
+```
+
+You can also query stack trace info programmatically:
+
+```lua
+local info = require("termlet").get_stacktrace_at_cursor()
+if info then
+  print("File: " .. info.path)
+  print("Line: " .. info.line)
+end
+```
+
+### Extensible Parser Plugin System
+
+TermLet includes an extensible parser plugin architecture for parsing stack traces from multiple languages.
+
+#### Using the Parser API
 
 Parse stack trace lines:
 
@@ -259,7 +291,7 @@ local result = stacktrace.parse_line('  File "/path/file.py", line 42')
 local results = stacktrace.parse_lines(terminal_buffer_lines)
 ```
 
-### Creating Custom Parsers
+#### Creating Custom Parsers
 
 Create parsers for any language:
 
@@ -290,7 +322,20 @@ require('termlet').setup({
 })
 ```
 
-### Parser Development
+#### Custom Pattern Registration
+
+Register patterns for additional languages or custom error formats:
+
+```lua
+require("termlet").stacktrace.register_pattern("myformat", {
+  pattern = "ERROR at ([^:]+):(%d+)",
+  file_pattern = "ERROR at ([^:]+):%d+",
+  line_pattern = ":(%d+)$",
+  priority = 10,
+})
+```
+
+#### Parser Development
 
 See the [Parser Development Guide](docs/PARSER_DEVELOPMENT.md) for:
 - Complete parser structure documentation
@@ -339,7 +384,7 @@ end, { desc = "Open TermLet Script Menu" })
 ```
 
 
-## ✅ Example ```termlet.lua``` using [lazy.nvim](https://github.com/LazyVim/LazyVim):
+## ✅ Example ```termlet.lua``` using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 return {
