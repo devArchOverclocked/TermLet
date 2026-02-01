@@ -1164,6 +1164,304 @@ describe("termlet", function()
     end)
   end)
 
+  describe("output persistence", function()
+    it("should use 'wipe' bufhidden by default", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "none",
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+
+      local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
+      assert.are.equal("wipe", bufhidden)
+    end)
+
+    it("should use 'hide' bufhidden when output_persistence is buffer", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+
+      local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
+      assert.are.equal("hide", bufhidden)
+    end)
+
+    it("should save buffer when window closes with buffer persistence", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+          max_saved_buffers = 5,
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test_output" })
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+
+      -- Close the window
+      vim.api.nvim_win_close(win, true)
+
+      -- Buffer should still be valid (hidden, not wiped)
+      assert.is_true(vim.api.nvim_buf_is_valid(buf))
+    end)
+
+    it("should enforce max_saved_buffers limit", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+          max_saved_buffers = 2,
+        },
+      })
+
+      local bufs = {}
+      for i = 1, 3 do
+        local buf, win = termlet.create_floating_terminal({ title = "test_" .. i })
+        bufs[i] = buf
+        vim.api.nvim_win_close(win, true)
+      end
+
+      -- Wait for autocmd to fire
+      vim.wait(100)
+
+      -- First buffer should have been deleted (only keep 2)
+      assert.is_false(vim.api.nvim_buf_is_valid(bufs[1]))
+      -- Last two should still exist
+      assert.is_true(vim.api.nvim_buf_is_valid(bufs[2]))
+      assert.is_true(vim.api.nvim_buf_is_valid(bufs[3]))
+    end)
+
+    it("should not save buffers when output_persistence is none", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "none",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      vim.api.nvim_win_close(win, true)
+
+      -- Wait briefly
+      vim.wait(100)
+
+      -- Buffer should be wiped
+      assert.is_false(vim.api.nvim_buf_is_valid(buf))
+    end)
+  end)
+
+  describe("show_last_output", function()
+    it("should return false when no saved outputs exist", function()
+      termlet.setup({ scripts = {} })
+      termlet.clear_outputs()
+
+      local result = termlet.show_last_output()
+      assert.is_false(result)
+    end)
+
+    it("should show the most recent saved output", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+        },
+      })
+
+      -- Create and close a terminal
+      local buf, win = termlet.create_floating_terminal({ title = "recent_output" })
+      vim.api.nvim_win_close(win, true)
+
+      -- Wait for save
+      vim.wait(100)
+
+      -- Should be able to show it
+      local result, output_win = termlet.show_last_output()
+      assert.is_true(result)
+
+      -- Close the re-opened window to avoid dangling floating windows
+      if output_win and vim.api.nvim_win_is_valid(output_win) then
+        vim.api.nvim_win_close(output_win, true)
+      end
+    end)
+
+    it("should set bufhidden=wipe on re-opened output viewer", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "viewer_test" })
+      vim.api.nvim_win_close(win, true)
+      vim.wait(100)
+
+      local result, output_win = termlet.show_last_output()
+      assert.is_true(result)
+      assert.is_not_nil(output_win)
+
+      -- The re-opened buffer should have bufhidden=wipe
+      local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
+      assert.are.equal("wipe", bufhidden)
+
+      -- Close the viewer window
+      if output_win and vim.api.nvim_win_is_valid(output_win) then
+        vim.api.nvim_win_close(output_win, true)
+      end
+    end)
+  end)
+
+  describe("list_outputs", function()
+    it("should return empty list when no saved outputs", function()
+      termlet.setup({ scripts = {} })
+      termlet.clear_outputs()
+
+      local outputs = termlet.list_outputs()
+      assert.are.equal(0, #outputs)
+    end)
+
+    it("should list all saved outputs", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+          max_saved_buffers = 5,
+        },
+      })
+
+      -- Create and close multiple terminals
+      for i = 1, 3 do
+        local buf, win = termlet.create_floating_terminal({ title = "output_" .. i })
+        vim.api.nvim_win_close(win, true)
+      end
+
+      vim.wait(100)
+
+      local outputs = termlet.list_outputs()
+      assert.are.equal(3, #outputs)
+    end)
+
+    it("should include buffer metadata in output list", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test_meta" })
+      vim.api.nvim_win_close(win, true)
+
+      vim.wait(100)
+
+      local outputs = termlet.list_outputs()
+      assert.are.equal(1, #outputs)
+      assert.is_string(outputs[1].name)
+      assert.is_string(outputs[1].timestamp)
+      assert.is_number(outputs[1].lines)
+    end)
+  end)
+
+  describe("clear_outputs", function()
+    it("should clear all saved outputs", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+        },
+      })
+
+      -- Create some outputs
+      for i = 1, 2 do
+        local buf, win = termlet.create_floating_terminal({ title = "output_" .. i })
+        vim.api.nvim_win_close(win, true)
+      end
+
+      vim.wait(100)
+
+      local count = termlet.clear_outputs()
+      assert.are.equal(2, count)
+
+      local outputs = termlet.list_outputs()
+      assert.are.equal(0, #outputs)
+    end)
+
+    it("should return 0 when no outputs to clear", function()
+      termlet.setup({ scripts = {} })
+      local count = termlet.clear_outputs()
+      assert.are.equal(0, count)
+    end)
+  end)
+
+  describe("output_persistence validation", function()
+    it("should fall back to none for invalid output_persistence value", function()
+      -- Should not error, should warn and fall back to "none"
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "file",
+        },
+      })
+
+      -- Verify it fell back to "none" by checking bufhidden is "wipe"
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+      local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
+      assert.are.equal("wipe", bufhidden)
+    end)
+
+    it("should accept valid output_persistence values", function()
+      for _, mode in ipairs({ "none", "buffer" }) do
+        termlet.setup({
+          scripts = {},
+          terminal = {
+            output_persistence = mode,
+          },
+        })
+        -- Should not error
+        local buf, win = termlet.create_floating_terminal({})
+        assert.is_not_nil(buf)
+      end
+    end)
+
+    it("should clean up saved buffers when setup changes persistence to none", function()
+      -- First create some saved buffers with "buffer" mode
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "buffer",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "cleanup_test" })
+      vim.api.nvim_win_close(win, true)
+      vim.wait(100)
+
+      -- Verify we have saved outputs
+      local outputs = termlet.list_outputs()
+      assert.is_true(#outputs > 0)
+
+      -- Now re-setup with "none" — should clear saved buffers
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          output_persistence = "none",
+        },
+      })
+
+      outputs = termlet.list_outputs()
+      assert.are.equal(0, #outputs)
+    end)
+  end)
+
   describe("find_script_by_name file exclusion integration", function()
     local tmpdir
 

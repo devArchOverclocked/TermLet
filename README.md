@@ -14,6 +14,7 @@
 * 🔀 **Dynamic function generation** for each script (e.g. `:lua require('termlet').run_my_script()`)
 * 😹 **Terminal cleanup** and safe resource handling
 * 🔍 **Stack trace detection** — automatically detect file references in error output and jump to source
+* 💾 **Output persistence** — preserve terminal output after window closes for later review
 * 🧪 **Debug-friendly** with verbose logging option
 
 ---
@@ -84,8 +85,10 @@ Here's the full configuration structure:
   terminal = {
     height_ratio = 0.16,
     width_ratio = 1.0,
-    border = "rounded", -- "none", "single", "double", "rounded", etc.
-    position = "bottom" -- "bottom", "center", "top"
+    border = "rounded",           -- "none", "single", "double", "rounded", etc.
+    position = "bottom",          -- "bottom", "center", "top"
+    output_persistence = "none",  -- "none" | "buffer"
+    max_saved_buffers = 5,        -- Maximum number of hidden buffers to keep
   },
   menu = {
     width_ratio = 0.6,  -- Menu window width (fraction of screen)
@@ -250,6 +253,67 @@ Additional utility methods:
 * `require("termlet").is_menu_open()` – check if menu is currently open
 * `require("termlet").close_all_terminals()` – close all terminals
 * `require("termlet").close_terminal()` – close the current or last terminal
+* `require("termlet").show_last_output()` – show output from the most recent script run
+* `require("termlet").list_outputs()` – list all saved terminal outputs
+* `require("termlet").clear_outputs()` – clear all saved terminal outputs
+
+---
+
+## 💾 Output Persistence
+
+TermLet can preserve terminal output after a script completes, allowing you to review build warnings, test results, or error messages even after closing the terminal window.
+
+### Configuration
+
+```lua
+require("termlet").setup({
+  terminal = {
+    output_persistence = "buffer",  -- "none" | "buffer"
+    max_saved_buffers = 5,          -- Maximum outputs to keep
+  },
+  -- ... other config
+})
+```
+
+### Persistence Modes
+
+- **`"none"`** (default): Terminal buffers are wiped when the window closes. Output is lost.
+- **`"buffer"`**: Terminal buffers are hidden when the window closes. Output is preserved and can be viewed later.
+
+### Usage
+
+After running scripts, access saved outputs:
+
+```lua
+-- View the most recent output
+vim.keymap.set("n", "<leader>tl", function()
+  require("termlet").show_last_output()
+end, { desc = "Show last terminal output" })
+
+-- List all saved outputs
+vim.keymap.set("n", "<leader>to", function()
+  require("termlet").list_outputs()
+end, { desc = "List saved outputs" })
+
+-- Clear all saved outputs
+vim.keymap.set("n", "<leader>tx", function()
+  require("termlet").clear_outputs()
+end, { desc = "Clear saved outputs" })
+```
+
+### Use Cases
+
+1. **Build output review**: After closing the terminal, review specific warnings or errors
+2. **Test results**: Check which tests failed after the terminal closed
+3. **Debugging**: Compare output from multiple script runs
+4. **Documentation**: Copy output for bug reports or documentation
+
+### Memory Management
+
+When `output_persistence = "buffer"`, TermLet automatically manages memory:
+- Old outputs are removed when `max_saved_buffers` limit is reached (FIFO)
+- Invalid buffers are cleaned up automatically
+- Use `clear_outputs()` to manually free memory
 
 ---
 
