@@ -555,7 +555,7 @@ make clean
 
 ```bash
 # Run all tests
-nvim --headless -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
+nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/"
 
 # Run a specific test file
 nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedFile tests/termlet_spec.lua"
