@@ -314,6 +314,9 @@ function M.process_terminal_output(data, cwd, buffer_id)
   local results = {}
   local line_offset = 0
 
+  -- Load highlight module if available
+  local highlight_ok, highlight = pcall(require, "termlet.highlight")
+
   for _, line in ipairs(data) do
     -- Increment line_offset for every element in data, including empty strings,
     -- because Neovim's on_stdout/on_stderr callbacks include empty strings as
@@ -336,6 +339,21 @@ function M.process_terminal_output(data, cwd, buffer_id)
         -- Store in buffer metadata keyed on actual terminal buffer line number
         if buffer_id then
           M.store_metadata(buffer_id, buffer_line, file_info)
+
+          -- Apply highlighting if available
+          -- We need to use vim.schedule because we're in a callback and need to
+          -- wait for the line to be fully rendered in the terminal buffer
+          if highlight_ok and highlight.is_enabled() then
+            vim.schedule(function()
+              if vim.api.nvim_buf_is_valid(buffer_id) then
+                -- Get the actual line text from the buffer
+                local lines = vim.api.nvim_buf_get_lines(buffer_id, buffer_line - 1, buffer_line, false)
+                if #lines > 0 then
+                  highlight.highlight_stacktrace_line(buffer_id, buffer_line, lines[1], file_info)
+                end
+              end
+            end)
+          end
         end
       end
     end
@@ -434,6 +452,9 @@ function M.scan_buffer_for_stacktraces(buffer_id, cwd)
   local lines = vim.api.nvim_buf_get_lines(buffer_id, 0, -1, false)
   local results = {}
 
+  -- Load highlight module if available
+  local highlight_ok, highlight = pcall(require, "termlet.highlight")
+
   for i, line in ipairs(lines) do
     if line and line ~= "" then
       local file_info = M.process_line(line, cwd)
@@ -441,6 +462,11 @@ function M.scan_buffer_for_stacktraces(buffer_id, cwd)
         file_info.buffer_line = i
         table.insert(results, file_info)
         M.store_metadata(buffer_id, i, file_info)
+
+        -- Apply highlighting if available
+        if highlight_ok and highlight.is_enabled() then
+          highlight.highlight_stacktrace_line(buffer_id, i, line, file_info)
+        end
       end
     end
   end

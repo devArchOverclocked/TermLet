@@ -6,6 +6,9 @@ local menu = require("termlet.menu")
 -- Load stacktrace module
 local stacktrace = require("termlet.stacktrace")
 
+-- Load highlight module
+local highlight = require("termlet.highlight")
+
 -- Load keybindings module
 local keybindings = require("termlet.keybindings")
 
@@ -70,6 +73,11 @@ local config = {
     custom_parsers = {},      -- Custom parser definitions
     parser_order = { "custom", "builtin" }, -- Parser priority
     buffer_size = 50,         -- Lines to keep in buffer for multi-line detection
+    highlight = {
+      enabled = true,         -- Enable visual highlighting of file paths
+      style = "underline",    -- "underline", "color", "both", "none"
+      hl_group = "TermLetStackTracePath", -- Custom highlight group
+    },
   },
   debug = false,
 }
@@ -535,6 +543,10 @@ local function execute_script(script)
   if config.stacktrace.enabled then
     stacktrace.clear_buffer()
     stacktrace.clear_all_metadata()
+    -- Clear any previous highlights from the buffer
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      highlight.clear_buffer(buf)
+    end
   end
 
   -- Determine command based on file extension or explicit command
@@ -649,6 +661,11 @@ function M.setup(user_config)
 
   -- Initialize stacktrace module with configuration
   stacktrace.setup(config.stacktrace)
+
+  -- Initialize highlight module with configuration
+  if config.stacktrace and config.stacktrace.highlight then
+    highlight.setup(config.stacktrace.highlight)
+  end
 
 
   -- Validate scripts configuration
@@ -803,6 +820,9 @@ end
 
 -- Stacktrace module access
 M.stacktrace = stacktrace
+
+-- Highlight module access
+M.highlight = highlight
 
 -- Get file info at cursor position in terminal buffer
 function M.get_stacktrace_at_cursor()
