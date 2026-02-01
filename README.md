@@ -103,9 +103,11 @@ Here's the full configuration structure:
     max_depth = 5,       -- Maximum recursion depth for file search
   },
   stacktrace = {
-    enabled = true,     -- Enable stack trace detection
-    languages = {},     -- Filter to specific languages (empty = all)
-    buffer_size = 50,   -- Lines kept in buffer for multi-line detection
+    enabled = true,                     -- Enable stack trace detection
+    languages = { 'python', 'csharp' }, -- Built-in parsers to load (empty = all)
+    custom_parsers = {},                -- Custom parser definitions
+    parser_order = { 'custom', 'builtin' }, -- Parser priority
+    buffer_size = 50,                   -- Lines kept in buffer for multi-line detection
   },
   debug = false,        -- Enable verbose debug logging
 }
@@ -411,7 +413,30 @@ TermLet automatically detects file references in terminal error output. When a s
 
 ### Supported Languages
 
-Python, JavaScript/TypeScript, Java, C#, Go, Rust, Ruby, Lua, C/C++, PHP, Perl, Elixir, Erlang, Swift, Kotlin, Haskell.
+TermLet includes built-in parsers for:
+- **Python** - Standard tracebacks, pytest format
+- **C#** - .NET stack traces, MSBuild errors
+- **JavaScript/TypeScript** - Node.js, browser, webpack formats
+- **Java** - Standard stack traces, compiler errors
+- **Go** - Panic and error traces
+- **Rust** - Compiler errors and backtraces
+- **Ruby** - Exception traces
+- **Lua** - Error messages
+- **C/C++** - Compiler errors
+- **PHP, Perl, Elixir, Erlang, Swift, Kotlin, Haskell**
+
+### Quick Start
+
+Enable stack trace parsing for specific languages:
+
+```lua
+require("termlet").setup({
+  stacktrace = {
+    enabled = true,
+    languages = { 'python', 'csharp' }, -- empty = all languages
+  }
+})
+```
 
 ### Usage
 
@@ -433,7 +458,57 @@ if info then
 end
 ```
 
-### Custom Patterns
+### Extensible Parser Plugin System
+
+TermLet includes an extensible parser plugin architecture for parsing stack traces from multiple languages.
+
+#### Using the Parser API
+
+Parse stack trace lines:
+
+```lua
+local stacktrace = require('termlet.stacktrace')
+
+-- Parse a single line
+local result = stacktrace.parse_line('  File "/path/file.py", line 42')
+-- Returns: { parser_name = "python", file_path = "/path/file.py", line_number = 42 }
+
+-- Parse multiple lines
+local results = stacktrace.parse_lines(terminal_buffer_lines)
+```
+
+#### Creating Custom Parsers
+
+Create parsers for any language:
+
+```lua
+local my_parser = {
+  name = 'go',
+  description = 'Go panic and error traces',
+
+  patterns = {
+    {
+      pattern = '([^:]+%.go):(%d+)',
+      path_group = 1,
+      line_group = 2,
+    }
+  },
+
+  resolve_path = function(path, cwd)
+    -- Custom path resolution logic
+    return path
+  end,
+}
+
+require('termlet').setup({
+  stacktrace = {
+    enabled = true,
+    custom_parsers = { my_parser },
+  }
+})
+```
+
+#### Custom Pattern Registration
 
 Register patterns for additional languages or custom error formats:
 
@@ -445,6 +520,15 @@ require("termlet").stacktrace.register_pattern("myformat", {
   priority = 10,
 })
 ```
+
+#### Parser Development
+
+See the [Parser Development Guide](docs/PARSER_DEVELOPMENT.md) for:
+- Complete parser structure documentation
+- Pattern syntax reference
+- Built-in parser examples
+- Testing guidelines
+- Best practices
 
 ---
 

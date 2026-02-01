@@ -67,6 +67,8 @@ local config = {
   stacktrace = {
     enabled = true,           -- Enable stack trace detection
     languages = {},           -- Languages to detect (empty = all)
+    custom_parsers = {},      -- Custom parser definitions
+    parser_order = { "custom", "builtin" }, -- Parser priority
     buffer_size = 50,         -- Lines to keep in buffer for multi-line detection
   },
   debug = false,

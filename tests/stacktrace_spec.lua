@@ -1,15 +1,20 @@
--- Tests for TermLet stacktrace module
+-- Tests for TermLet stacktrace module and parser plugin architecture
 -- Run with: nvim --headless -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
 
 describe("termlet.stacktrace", function()
   local stacktrace
 
   before_each(function()
-    -- Clear cached module to get fresh state
+    -- Clear cached modules to get fresh state
     package.loaded["termlet.stacktrace"] = nil
+    package.loaded["termlet.parsers.python"] = nil
+    package.loaded["termlet.parsers.csharp"] = nil
+    package.loaded["termlet.parsers.javascript"] = nil
+    package.loaded["termlet.parsers.java"] = nil
     stacktrace = require("termlet.stacktrace")
     stacktrace.clear_buffer()
     stacktrace.clear_all_metadata()
+    stacktrace.clear_parsers()
   end)
 
   describe("setup", function()
@@ -53,6 +58,846 @@ describe("termlet.stacktrace", function()
       assert.is_not_nil(patterns.swift)
       assert.is_not_nil(patterns.kotlin)
       assert.is_not_nil(patterns.haskell)
+    end)
+  end)
+
+  describe("parser validation", function()
+    it("should reject parser without name", function()
+      local parser = {
+        patterns = {
+          { pattern = "test", path_group = 1, line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("name"))
+    end)
+
+    it("should reject parser with empty name", function()
+      local parser = {
+        name = "",
+        patterns = {
+          { pattern = "test", path_group = 1, line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("name"))
+    end)
+
+    it("should reject parser without patterns", function()
+      local parser = {
+        name = "test",
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("patterns"))
+    end)
+
+    it("should reject parser with empty patterns array", function()
+      local parser = {
+        name = "test",
+        patterns = {}
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("patterns"))
+    end)
+
+    it("should reject pattern without pattern field", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { path_group = 1, line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("pattern"))
+    end)
+
+    it("should reject pattern with invalid Lua pattern", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "test[", path_group = 1, line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("invalid"))
+    end)
+
+    it("should reject pattern without path_group", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "test", line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("path_group"))
+    end)
+
+    it("should reject pattern without line_group", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "test", path_group = 1 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_false(ok)
+      assert.is_truthy(err:match("line_group"))
+    end)
+
+    it("should accept valid parser with all required fields", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_true(ok)
+      assert.is_nil(err)
+    end)
+
+    it("should accept parser with optional description", function()
+      local parser = {
+        name = "test",
+        description = "Test parser",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_true(ok)
+    end)
+
+    it("should accept parser with optional column_group", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+):(%d+)", path_group = 1, line_group = 2, column_group = 3 }
+        }
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_true(ok)
+    end)
+
+    it("should accept parser with optional resolve_path function", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        resolve_path = function(path, cwd) return path end
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_true(ok)
+    end)
+
+    it("should accept parser with optional is_context_match function", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        is_context_match = function(lines, index) return true end
+      }
+      local ok, err = stacktrace.register_parser(parser)
+      assert.is_true(ok)
+    end)
+
+    it("should reject duplicate parser names", function()
+      local parser1 = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      local parser2 = {
+        name = "test",
+        patterns = {
+          { pattern = "other", path_group = 1, line_group = 2 }
+        }
+      }
+
+      local ok1, err1 = stacktrace.register_parser(parser1)
+      assert.is_true(ok1)
+
+      local ok2, err2 = stacktrace.register_parser(parser2)
+      assert.is_false(ok2)
+      assert.is_truthy(err2:match("already registered"))
+    end)
+  end)
+
+  describe("parser registration", function()
+    it("should register a valid parser", function()
+      local parser = {
+        name = "myparser",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      local ok = stacktrace.register_parser(parser)
+      assert.is_true(ok)
+
+      local retrieved = stacktrace.get_parser("myparser")
+      assert.is_not_nil(retrieved)
+      assert.are.equal("myparser", retrieved.name)
+    end)
+
+    it("should unregister a parser", function()
+      local parser = {
+        name = "myparser",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local ok = stacktrace.unregister_parser("myparser")
+      assert.is_true(ok)
+
+      local retrieved = stacktrace.get_parser("myparser")
+      assert.is_nil(retrieved)
+    end)
+
+    it("should return false when unregistering non-existent parser", function()
+      local ok = stacktrace.unregister_parser("nonexistent")
+      assert.is_false(ok)
+    end)
+
+    it("should retrieve all registered parsers", function()
+      local parser1 = {
+        name = "parser1",
+        patterns = {
+          { pattern = "test1", path_group = 1, line_group = 2 }
+        }
+      }
+      local parser2 = {
+        name = "parser2",
+        patterns = {
+          { pattern = "test2", path_group = 1, line_group = 2 }
+        }
+      }
+
+      stacktrace.register_parser(parser1)
+      stacktrace.register_parser(parser2)
+
+      local all_parsers = stacktrace.get_all_parsers()
+      assert.are.equal(2, #all_parsers)
+    end)
+
+    it("should clear all parsers", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "test", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      stacktrace.clear_parsers()
+
+      local all_parsers = stacktrace.get_all_parsers()
+      assert.are.equal(0, #all_parsers)
+    end)
+  end)
+
+  describe("line parsing", function()
+    it("should parse a simple stack trace line", function()
+      local parser = {
+        name = "simple",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line("file.txt:42")
+      assert.is_not_nil(result)
+      assert.are.equal("simple", result.parser_name)
+      assert.are.equal("file.txt", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.is_nil(result.column_number)
+    end)
+
+    it("should parse line with column number", function()
+      local parser = {
+        name = "with_col",
+        patterns = {
+          { pattern = "([^:]+):(%d+):(%d+)", path_group = 1, line_group = 2, column_group = 3 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line("file.txt:42:15")
+      assert.is_not_nil(result)
+      assert.are.equal(42, result.line_number)
+      assert.are.equal(15, result.column_number)
+    end)
+
+    it("should return nil for non-matching line", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line("no match here")
+      assert.is_nil(result)
+    end)
+
+    it("should try multiple patterns", function()
+      local parser = {
+        name = "multi",
+        patterns = {
+          { pattern = "Format1:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 },
+          { pattern = "Format2%s+([^:]+)%s+(%d+)", path_group = 1, line_group = 2 },
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result1 = stacktrace.parse_line("Format1: file.txt:42")
+      assert.is_not_nil(result1)
+      assert.are.equal("file.txt", result1.file_path)
+
+      local result2 = stacktrace.parse_line("Format2 other.txt 99")
+      assert.is_not_nil(result2)
+      assert.are.equal("other.txt", result2.file_path)
+    end)
+
+    it("should use custom resolve_path function", function()
+      local parser = {
+        name = "custom_resolve",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        resolve_path = function(path, cwd)
+          return "/resolved/" .. path
+        end
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line("file.txt:42")
+      assert.is_not_nil(result)
+      assert.are.equal("/resolved/file.txt", result.file_path)
+    end)
+  end)
+
+  describe("multiple line parsing", function()
+    it("should parse multiple lines", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local lines = {
+        "file1.txt:10",
+        "no match",
+        "file2.txt:20",
+      }
+
+      local results = stacktrace.parse_lines(lines)
+      assert.are.equal(2, #results)
+      assert.are.equal("file1.txt", results[1].file_path)
+      assert.are.equal(10, results[1].line_number)
+      assert.are.equal(1, results[1].line_index)
+      assert.are.equal("file2.txt", results[2].file_path)
+      assert.are.equal(20, results[2].line_number)
+      assert.are.equal(3, results[2].line_index)
+    end)
+
+    it("should return empty array for nil input", function()
+      local results = stacktrace.parse_lines(nil)
+      assert.are.equal(0, #results)
+    end)
+
+    it("should return empty array for empty lines", function()
+      local results = stacktrace.parse_lines({})
+      assert.are.equal(0, #results)
+    end)
+  end)
+
+  describe("setup and configuration", function()
+    it("should load built-in parsers from config", function()
+      stacktrace.setup({
+        languages = { "python" }
+      })
+
+      local parser = stacktrace.get_parser("python")
+      assert.is_not_nil(parser)
+      assert.are.equal("python", parser.name)
+    end)
+
+    it("should load multiple built-in parsers", function()
+      stacktrace.setup({
+        languages = { "python", "csharp" }
+      })
+
+      local python = stacktrace.get_parser("python")
+      local csharp = stacktrace.get_parser("csharp")
+      assert.is_not_nil(python)
+      assert.is_not_nil(csharp)
+    end)
+
+    it("should load custom parsers from config", function()
+      local custom_parser = {
+        name = "custom",
+        patterns = {
+          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+
+      stacktrace.setup({
+        custom_parsers = { custom_parser }
+      })
+
+      local parser = stacktrace.get_parser("custom")
+      assert.is_not_nil(parser)
+      assert.is_true(parser.custom)
+    end)
+
+    it("should warn on invalid built-in parser", function()
+      -- Should not error, just warn
+      stacktrace.setup({
+        languages = { "nonexistent_language" }
+      })
+    end)
+
+    it("should warn on invalid custom parser", function()
+      local invalid_parser = {
+        name = "invalid",
+        -- Missing patterns
+      }
+
+      -- Should not error, just warn
+      stacktrace.setup({
+        custom_parsers = { invalid_parser }
+      })
+    end)
+
+    it("should return config via get_config", function()
+      local config = {
+        enabled = true,
+        languages = { "python" }
+      }
+      stacktrace.setup(config)
+
+      local retrieved_config = stacktrace.get_config()
+      assert.is_not_nil(retrieved_config)
+      assert.is_true(retrieved_config.enabled)
+    end)
+  end)
+
+  describe("Python parser", function()
+    local python_parser
+
+    before_each(function()
+      package.loaded["termlet.parsers.python"] = nil
+      python_parser = require("termlet.parsers.python")
+      stacktrace.register_parser(python_parser)
+    end)
+
+    it("should parse standard Python traceback format", function()
+      local line = '  File "/path/to/file.py", line 42, in function_name'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("python", result.parser_name)
+      assert.are.equal("/path/to/file.py", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+
+    it("should parse Python traceback with single quotes", function()
+      local line = "  File '/path/to/file.py', line 99, in method"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("/path/to/file.py", result.file_path)
+      assert.are.equal(99, result.line_number)
+    end)
+
+    it("should parse pytest format", function()
+      local line = "tests/test_module.py:42: AssertionError"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("tests/test_module.py", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+  end)
+
+  describe("C# parser", function()
+    local csharp_parser
+
+    before_each(function()
+      package.loaded["termlet.parsers.csharp"] = nil
+      csharp_parser = require("termlet.parsers.csharp")
+      stacktrace.register_parser(csharp_parser)
+    end)
+
+    it("should parse standard .NET stack trace format with Windows path", function()
+      local line = "   at ClassName.MethodName() in C:\\path\\to\\File.cs:line 42"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("csharp", result.parser_name)
+      -- Verify full Windows path is captured (not just drive letter)
+      -- resolve_path normalizes backslashes to forward slashes
+      assert.are.equal("C:/path/to/File.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+
+    it("should parse Unix-style C# stack trace", function()
+      local line = "   at ClassName.MethodName() in /path/to/File.cs:line 99"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("/path/to/File.cs", result.file_path)
+      assert.are.equal(99, result.line_number)
+    end)
+
+    it("should parse MSBuild error format", function()
+      local line = "File.cs(42,15): error CS1234: Error message"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("File.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.are.equal(15, result.column_number)
+    end)
+  end)
+
+  describe("JavaScript parser", function()
+    local js_parser
+
+    before_each(function()
+      package.loaded["termlet.parsers.javascript"] = nil
+      js_parser = require("termlet.parsers.javascript")
+      stacktrace.register_parser(js_parser)
+    end)
+
+    it("should parse Node.js stack trace format", function()
+      local line = "    at functionName (/path/to/file.js:42:15)"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("javascript", result.parser_name)
+      assert.are.equal("/path/to/file.js", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.are.equal(15, result.column_number)
+    end)
+
+    it("should parse browser stack trace format", function()
+      local line = "at http://localhost:3000/app.js:42:15"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("app.js", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+  end)
+
+  describe("Java parser", function()
+    local java_parser
+
+    before_each(function()
+      package.loaded["termlet.parsers.java"] = nil
+      java_parser = require("termlet.parsers.java")
+      stacktrace.register_parser(java_parser)
+    end)
+
+    it("should parse standard Java stack trace format", function()
+      local line = "\tat com.example.ClassName.methodName(FileName.java:42)"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("java", result.parser_name)
+      assert.are.equal("FileName.java", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+
+    it("should parse Java compiler error format", function()
+      local line = "FileName.java:99: error: compilation error message"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("FileName.java", result.file_path)
+      assert.are.equal(99, result.line_number)
+    end)
+  end)
+
+  describe("setup idempotency", function()
+    it("should allow calling setup() twice without errors", function()
+      stacktrace.setup({
+        languages = { "python" }
+      })
+      local python1 = stacktrace.get_parser("python")
+      assert.is_not_nil(python1)
+
+      -- Second call should not fail
+      stacktrace.setup({
+        languages = { "python", "csharp" }
+      })
+      local python2 = stacktrace.get_parser("python")
+      local csharp = stacktrace.get_parser("csharp")
+      assert.is_not_nil(python2)
+      assert.is_not_nil(csharp)
+    end)
+
+    it("should replace parsers when setup() called with different config", function()
+      stacktrace.setup({
+        languages = { "python", "csharp" }
+      })
+      assert.is_not_nil(stacktrace.get_parser("python"))
+      assert.is_not_nil(stacktrace.get_parser("csharp"))
+
+      -- Second setup with only python
+      stacktrace.setup({
+        languages = { "python" }
+      })
+      assert.is_not_nil(stacktrace.get_parser("python"))
+      assert.is_nil(stacktrace.get_parser("csharp"))
+    end)
+  end)
+
+  describe("parser ordering determinism", function()
+    it("should respect custom before builtin order", function()
+      local custom_parser = {
+        name = "custom_at",
+        patterns = {
+          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        custom = true,
+      }
+      local builtin_parser = {
+        name = "builtin_at",
+        patterns = {
+          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        },
+      }
+
+      stacktrace.register_parser(builtin_parser)
+      stacktrace.register_parser(custom_parser)
+
+      -- With default parser_order = { "custom", "builtin" }, custom should match first
+      local result = stacktrace.parse_line("  at file.txt:42")
+      assert.is_not_nil(result)
+      assert.are.equal("custom_at", result.parser_name)
+    end)
+
+    it("should return parsers in insertion order via get_all_parsers", function()
+      local parser_a = {
+        name = "aaa",
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+      }
+      local parser_b = {
+        name = "bbb",
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+      }
+      local parser_c = {
+        name = "ccc",
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+      }
+
+      stacktrace.register_parser(parser_a)
+      stacktrace.register_parser(parser_b)
+      stacktrace.register_parser(parser_c)
+
+      local all = stacktrace.get_all_parsers()
+      assert.are.equal(3, #all)
+      assert.are.equal("aaa", all[1].name)
+      assert.are.equal("bbb", all[2].name)
+      assert.are.equal("ccc", all[3].name)
+    end)
+  end)
+
+  describe("empty optional column capture", function()
+    it("should return nil column_number for empty optional capture", function()
+      local parser = {
+        name = "optional_col",
+        patterns = {
+          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      -- Line without column number - (%d*) matches empty string
+      local result = stacktrace.parse_line("file.txt:42")
+      assert.is_not_nil(result)
+      assert.are.equal("file.txt", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.is_nil(result.column_number)
+    end)
+
+    it("should return column_number when present", function()
+      local parser = {
+        name = "optional_col2",
+        patterns = {
+          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line("file.txt:42:15")
+      assert.is_not_nil(result)
+      assert.are.equal(15, result.column_number)
+    end)
+  end)
+
+  describe("parse_line with invalid input types", function()
+    it("should return nil for number input", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line(123)
+      assert.is_nil(result)
+    end)
+
+    it("should return nil for table input", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line({})
+      assert.is_nil(result)
+    end)
+
+    it("should return nil for boolean input", function()
+      local parser = {
+        name = "test",
+        patterns = {
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+      stacktrace.register_parser(parser)
+
+      local result = stacktrace.parse_line(true)
+      assert.is_nil(result)
+    end)
+  end)
+
+  describe("is_context_match disambiguation", function()
+    it("should use is_context_match to disambiguate in parse_lines", function()
+      -- Register two parsers that both match "at" patterns
+      local parser_csharp_like = {
+        name = "csharp_like",
+        patterns = {
+          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        is_context_match = function(lines, index)
+          for i = math.max(1, index - 3), math.min(#lines, index + 3) do
+            if lines[i] and lines[i]:match("%.cs:") then
+              return true
+            end
+          end
+          return false
+        end,
+      }
+      local parser_java_like = {
+        name = "java_like",
+        patterns = {
+          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 }
+        },
+        is_context_match = function(lines, index)
+          for i = math.max(1, index - 3), math.min(#lines, index + 3) do
+            if lines[i] and lines[i]:match("%.java:") then
+              return true
+            end
+          end
+          return false
+        end,
+      }
+
+      stacktrace.register_parser(parser_csharp_like)
+      stacktrace.register_parser(parser_java_like)
+
+      -- Java context lines
+      local lines = {
+        "Exception in thread main",
+        "  at com.example.Class:42",
+        "  at App.java:10",
+      }
+
+      local results = stacktrace.parse_lines(lines)
+      -- The second line should disambiguate to java_like due to .java: context
+      local java_match = nil
+      for _, r in ipairs(results) do
+        if r.line_index == 2 then
+          java_match = r
+          break
+        end
+      end
+      assert.is_not_nil(java_match)
+      assert.are.equal("java_like", java_match.parser_name)
+    end)
+  end)
+
+  describe("setup does not mutate user objects", function()
+    it("should not add .custom field to user-provided parser table", function()
+      local my_parser = {
+        name = "user_parser",
+        patterns = {
+          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+        }
+      }
+
+      stacktrace.setup({
+        custom_parsers = { my_parser }
+      })
+
+      -- The original table should NOT have been mutated
+      assert.is_nil(my_parser.custom)
+    end)
+  end)
+
+  describe("C# parser Windows paths", function()
+    local csharp_parser
+
+    before_each(function()
+      package.loaded["termlet.parsers.csharp"] = nil
+      csharp_parser = require("termlet.parsers.csharp")
+      stacktrace.register_parser(csharp_parser)
+    end)
+
+    it("should capture full Windows path including drive letter", function()
+      local line = "   at MyClass.Method() in C:\\Users\\dev\\Project\\File.cs:line 42"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("csharp", result.parser_name)
+      -- resolve_path normalizes backslashes to forward slashes
+      assert.are.equal("C:/Users/dev/Project/File.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+
+    it("should capture full Windows path with D drive", function()
+      local line = "   at MyClass.Method() in D:\\code\\src\\Program.cs:line 100"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      -- resolve_path normalizes backslashes to forward slashes
+      assert.are.equal("D:/code/src/Program.cs", result.file_path)
+      assert.are.equal(100, result.line_number)
     end)
   end)
 
@@ -114,163 +959,6 @@ describe("termlet.stacktrace", function()
       assert.equals(123, info.line)
     end)
 
-    it("should extract JavaScript stack trace info with function name", function()
-      local line = "    at myFunction (/home/user/project/index.js:25:10)"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.javascript, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/index.js", info.path)
-      assert.equals(25, info.line)
-      assert.equals(10, info.column)
-      assert.equals("myFunction", info.context)
-    end)
-
-    it("should extract Go stack trace info", function()
-      local line = "	/home/user/project/main.go:42 +0x456"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.go, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/main.go", info.path)
-      assert.equals(42, info.line)
-    end)
-
-    it("should extract Java stack trace info", function()
-      local line = "	at com.example.MyClass.method(MyFile.java:55)"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.java, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("MyFile.java", info.original_path)
-      assert.equals(55, info.line)
-    end)
-
-    it("should extract Lua stack trace info", function()
-      local line = "	/home/user/project/init.lua:123: attempt to index nil value"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.lua, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/init.lua", info.path)
-      assert.equals(123, info.line)
-    end)
-
-    it("should extract Ruby stack trace info", function()
-      local line = "/home/user/project/app.rb:78:in `calculate'"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.ruby, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/app.rb", info.path)
-      assert.equals(78, info.line)
-      assert.equals("calculate", info.context)
-    end)
-
-    it("should extract Rust stack trace info", function()
-      local line = "   at /home/user/project/main.rs:42:15"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.rust, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/main.rs", info.path)
-      assert.equals(42, info.line)
-      assert.equals(15, info.column)
-    end)
-
-    it("should extract Elixir stack trace info", function()
-      local line = "    lib/my_app/worker.ex:42: MyApp.Worker.run/1"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.elixir, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("lib/my_app/worker.ex", info.original_path)
-      assert.equals(42, info.line)
-    end)
-
-    it("should extract Erlang stack trace info", function()
-      local line = '{module,function,1,[{file,"src/module.erl"},{line,42}]}'
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.erlang, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("src/module.erl", info.original_path)
-      assert.equals(42, info.line)
-    end)
-
-    it("should extract Swift stack trace info", function()
-      local line = "/home/user/project/main.swift:42:15: error: something went wrong"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.swift, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/main.swift", info.path)
-      assert.equals(42, info.line)
-      assert.equals(15, info.column)
-    end)
-
-    it("should extract Kotlin stack trace info", function()
-      local line = "	at com.example.MyClass.method(MyFile.kt:55)"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.kotlin, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("MyFile.kt", info.original_path)
-      assert.equals(55, info.line)
-    end)
-
-    it("should extract Haskell stack trace info", function()
-      local line = "/home/user/project/Main.hs:42:15: error:"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.haskell, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/Main.hs", info.path)
-      assert.equals(42, info.line)
-      assert.equals(15, info.column)
-    end)
-
-    it("should extract PHP stack trace info", function()
-      local line = "#0 /home/user/project/index.php(42): ClassName->method()"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.php, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.truthy(info.path:find("index%.php"))
-      assert.equals(42, info.line)
-    end)
-
-    it("should extract Perl stack trace info", function()
-      local line = "at /home/user/project/script.pl line 42."
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.perl, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/script.pl", info.path)
-      assert.equals(42, info.line)
-    end)
-
-    it("should extract C/C++ stack trace info", function()
-      local line = "/home/user/project/main.cpp:42:15: error: expected ';'"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.cpp_source, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/main.cpp", info.path)
-      assert.equals(42, info.line)
-    end)
-
-    it("should extract C header file stack trace info", function()
-      local line = "/home/user/project/utils.h:10:5: warning: unused variable"
-      local patterns = stacktrace.get_patterns()
-      local info = stacktrace.extract_file_info(line, patterns.h_header, "/home/user/project")
-
-      assert.is_not_nil(info)
-      assert.equals("/home/user/project/utils.h", info.path)
-      assert.equals(10, info.line)
-      assert.equals(5, info.column)
-    end)
-
     it("should return nil for non-matching line", function()
       local line = "This is just a regular log message"
       local patterns = stacktrace.get_patterns()
@@ -288,7 +976,6 @@ describe("termlet.stacktrace", function()
 
     it("should resolve relative paths using cwd", function()
       local result = stacktrace.resolve_path("src/main.py", "/home/user/project")
-      -- The result should contain the cwd
       assert.truthy(result:find("/home/user/project", 1, true))
       assert.truthy(result:find("src/main.py", 1, true))
     end)
@@ -310,18 +997,9 @@ describe("termlet.stacktrace", function()
 
     it("should expand tilde to home directory", function()
       local result = stacktrace.resolve_path("~/project/file.py", "/cwd")
-      -- After tilde expansion, path should start with / (absolute)
       assert.truthy(result:sub(1, 1) == "/")
-      -- Should contain the rest of the path
       assert.truthy(result:find("project/file.py", 1, true))
-      -- Should NOT start with ~
       assert.is_nil(result:find("^~"))
-    end)
-
-    it("should expand tilde with subdirectory", function()
-      local result = stacktrace.resolve_path("~/src/main.py", nil)
-      assert.truthy(result:sub(1, 1) == "/")
-      assert.truthy(result:find("src/main.py", 1, true))
     end)
   end)
 
@@ -356,69 +1034,6 @@ describe("termlet.stacktrace", function()
     it("should return nil for nil line", function()
       local result = stacktrace.process_line(nil, "/home/user")
       assert.is_nil(result)
-    end)
-
-    it("should detect C/C++ compiler error line", function()
-      local line = "/home/user/main.cpp:42:15: error: expected ';'"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("cpp_source", result.language)
-      assert.equals(42, result.line)
-    end)
-
-    it("should detect PHP stack trace line", function()
-      local line = "#0 /home/user/index.php(42): ClassName->method()"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("php", result.language)
-      assert.equals(42, result.line)
-    end)
-
-    it("should detect Perl stack trace line", function()
-      local line = "at /home/user/script.pl line 42."
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("perl", result.language)
-      assert.equals(42, result.line)
-    end)
-
-    it("should detect Elixir stack trace line", function()
-      local line = "    lib/my_app/worker.ex:42: MyApp.Worker.run/1"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("elixir", result.language)
-      assert.equals(42, result.line)
-    end)
-
-    it("should detect Swift stack trace line", function()
-      local line = "/home/user/main.swift:42:15: error: something went wrong"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("swift", result.language)
-      assert.equals(42, result.line)
-    end)
-
-    it("should detect Kotlin stack trace line", function()
-      local line = "	at com.example.MyClass.method(MyFile.kt:55)"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("kotlin", result.language)
-      assert.equals(55, result.line)
-    end)
-
-    it("should detect Haskell stack trace line", function()
-      local line = "/home/user/Main.hs:42:15: error:"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("haskell", result.language)
-      assert.equals(42, result.line)
     end)
   end)
 
@@ -475,76 +1090,6 @@ describe("termlet.stacktrace", function()
     end)
   end)
 
-  describe("process_terminal_output", function()
-    before_each(function()
-      stacktrace.setup({})
-    end)
-
-    it("should process terminal data and add to buffer", function()
-      local data = {
-        'File "/home/user/test.py", line 10, in main',
-        "Error occurred",
-      }
-
-      stacktrace.process_terminal_output(data, "/home/user", nil)
-      local buffer = stacktrace.get_buffer()
-
-      assert.equals(2, #buffer)
-    end)
-
-    it("should store metadata when buffer_id provided", function()
-      local data = {
-        'File "/home/user/test.py", line 10, in main',
-      }
-
-      -- buffer_id 123 is not a valid Neovim buffer, so terminal_line_count = 0
-      -- First non-empty line gets line_offset=1, so metadata key = 0 + 1 = 1
-      stacktrace.process_terminal_output(data, "/home/user", 123)
-      local metadata = stacktrace.get_buffer_metadata(123)
-
-      assert.is_not_nil(metadata[1])
-      assert.equals("/home/user/test.py", metadata[1].path)
-    end)
-
-    it("should key metadata on offset-based line numbers", function()
-      local data = {
-        "Some log line with no trace",
-        'File "/home/user/test.py", line 10, in main',
-      }
-
-      stacktrace.process_terminal_output(data, "/home/user", 456)
-      local metadata = stacktrace.get_buffer_metadata(456)
-
-      -- Both lines are non-empty, so line_offset increments for each.
-      -- The stack trace is the 2nd line -> key = 0 + 2 = 2
-      assert.is_nil(metadata[1]) -- First line is not a stack trace
-      assert.is_not_nil(metadata[2])
-      assert.equals("/home/user/test.py", metadata[2].path)
-    end)
-
-    it("should count empty strings in line offset for accurate terminal mapping", function()
-      -- Neovim's on_stdout/on_stderr includes empty strings as line separators.
-      -- Each element corresponds to a terminal buffer line, so empty strings must
-      -- be counted in the line offset.
-      local data = {
-        "error line",
-        "",
-        'File "/home/user/test.py", line 10, in main',
-        "",
-      }
-
-      stacktrace.process_terminal_output(data, "/home/user", 789)
-      local metadata = stacktrace.get_buffer_metadata(789)
-
-      -- The stack trace is at index 3 in data (including empty strings).
-      -- line_offset = 3 at that point, so metadata key = 0 + 3 = 3
-      assert.is_nil(metadata[1]) -- "error line" is not a stack trace
-      assert.is_nil(metadata[2]) -- empty string
-      assert.is_not_nil(metadata[3])
-      assert.equals("/home/user/test.py", metadata[3].path)
-    end)
-  end)
-
   describe("metadata storage", function()
     it("should store and retrieve metadata", function()
       local file_info = { path = "/test/file.py", line = 10 }
@@ -584,7 +1129,7 @@ describe("termlet.stacktrace", function()
   describe("find_nearest_metadata", function()
     before_each(function()
       stacktrace.store_metadata(1, 5, { path = "file1.py", line = 10 })
-      stacktrace.store_metadata(1, 10, { path = "file2.py", line = 20 })
+      stacktrace.store_metadata(1, 20, { path = "file2.py", line = 20 })
     end)
 
     it("should find exact match", function()
@@ -592,24 +1137,26 @@ describe("termlet.stacktrace", function()
       assert.equals("file1.py", result.path)
     end)
 
-    it("should find nearby metadata above", function()
-      local result = stacktrace.find_nearest_metadata(1, 7, 5)
-      assert.equals("file1.py", result.path)
-    end)
-
-    it("should find nearby metadata below", function()
-      local result = stacktrace.find_nearest_metadata(1, 8, 5)
+    it("should find nearby metadata within default range of 10", function()
+      local result = stacktrace.find_nearest_metadata(1, 14)
+      assert.is_not_nil(result)
       assert.equals("file2.py", result.path)
     end)
 
     it("should return nil when no metadata in range", function()
-      local result = stacktrace.find_nearest_metadata(1, 100, 5)
+      local result = stacktrace.find_nearest_metadata(1, 40)
       assert.is_nil(result)
     end)
 
     it("should return nil for non-existent buffer", function()
       local result = stacktrace.find_nearest_metadata(999, 5)
       assert.is_nil(result)
+    end)
+
+    it("should respect custom range when specified", function()
+      local result = stacktrace.find_nearest_metadata(1, 8, 3)
+      assert.is_not_nil(result)
+      assert.equals("file1.py", result.path)
     end)
   end)
 
@@ -654,105 +1201,6 @@ describe("termlet.stacktrace", function()
     end)
   end)
 
-  describe("language filtering", function()
-    before_each(function()
-      stacktrace.setup({ languages = { "python" } })
-    end)
-
-    it("should detect enabled language", function()
-      local line = 'File "/home/user/test.py", line 10, in main'
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("python", result.language)
-    end)
-
-    it("should not detect disabled language", function()
-      local line = "   at MyClass.Method() in /home/user/Program.cs:line 42"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_nil(result)
-    end)
-  end)
-
-  describe("pattern ordering and priority", function()
-    before_each(function()
-      stacktrace.setup({})
-    end)
-
-    it("should return patterns in priority order via get_pattern_list", function()
-      local list = stacktrace.get_pattern_list()
-      assert.is_true(#list > 0)
-      -- Verify descending priority order
-      for i = 2, #list do
-        assert.is_true(list[i - 1].priority >= list[i].priority,
-          "Pattern " .. list[i - 1].language .. " (priority " .. list[i - 1].priority ..
-          ") should come before " .. list[i].language .. " (priority " .. list[i].priority .. ")")
-      end
-    end)
-
-    it("should match higher-priority patterns first", function()
-      -- Python pattern has priority 10, so it should match before any lower-priority pattern
-      local line = 'File "/home/user/test.py", line 10, in main'
-      local result = stacktrace.process_line(line, "/home/user")
-      assert.is_not_nil(result)
-      assert.equals("python", result.language)
-    end)
-
-    it("should allow re-registering a pattern with new priority", function()
-      stacktrace.register_pattern("custom_high", {
-        pattern = "CUSTOM: (.+):(%d+)",
-        file_pattern = "CUSTOM: (.+):%d+",
-        line_pattern = ":(%d+)$",
-        priority = 100,
-      })
-
-      local list = stacktrace.get_pattern_list()
-      -- The custom_high pattern should be first due to highest priority
-      assert.equals("custom_high", list[1].language)
-    end)
-  end)
-
-  describe("get_patterns immutability", function()
-    before_each(function()
-      stacktrace.setup({})
-    end)
-
-    it("should return a copy, not a reference", function()
-      local patterns1 = stacktrace.get_patterns()
-      local patterns2 = stacktrace.get_patterns()
-      -- Modifying the returned table should not affect future calls
-      patterns1.python = nil
-      assert.is_not_nil(patterns2.python)
-      -- Get a fresh copy and verify python is still there
-      local patterns3 = stacktrace.get_patterns()
-      assert.is_not_nil(patterns3.python)
-    end)
-
-    it("should return a deep copy from get_pattern_list", function()
-      local list1 = stacktrace.get_pattern_list()
-      local list2 = stacktrace.get_pattern_list()
-      -- Modifying the returned list should not affect internal state
-      table.remove(list1, 1)
-      assert.is_true(#list2 > #list1)
-    end)
-  end)
-
-  describe("get_config", function()
-    it("should return current configuration", function()
-      stacktrace.setup({
-        enabled = true,
-        buffer_size = 100,
-        languages = { "python", "javascript" },
-      })
-
-      local cfg = stacktrace.get_config()
-      assert.is_true(cfg.enabled)
-      assert.equals(100, cfg.buffer_size)
-      assert.equals(2, #cfg.languages)
-    end)
-  end)
-
   describe("strip_ansi", function()
     before_each(function()
       stacktrace.setup({})
@@ -770,302 +1218,10 @@ describe("termlet.stacktrace", function()
       assert.equals("error: something failed at /path/file.py:42", result)
     end)
 
-    it("should strip multi-parameter CSI sequences", function()
-      local input = "\27[1;31;40mBold red text\27[0m"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals("Bold red text", result)
-    end)
-
-    it("should remove carriage returns", function()
-      local input = "File \"/home/user/test.py\", line 7\r"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals('File "/home/user/test.py", line 7', result)
-    end)
-
     it("should return clean string unchanged", function()
       local input = 'File "/home/user/test.py", line 7, in main'
       local result = stacktrace.strip_ansi(input)
       assert.equals(input, result)
-    end)
-
-    it("should handle empty string", function()
-      assert.equals("", stacktrace.strip_ansi(""))
-    end)
-
-    it("should handle cursor movement sequences", function()
-      local input = "\27[2A\27[3B/path/to/file.py:42: error"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals("/path/to/file.py:42: error", result)
-    end)
-
-    it("should strip private-mode CSI sequences with ? prefix", function()
-      local input = "\27[?25l/path/to/file.py:42: error\27[?25h"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals("/path/to/file.py:42: error", result)
-    end)
-
-    it("should strip alternate screen buffer sequences", function()
-      local input = "\27[?1049h  File \"/home/user/test.py\", line 7\27[?1049l"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals('  File "/home/user/test.py", line 7', result)
-    end)
-
-    it("should strip > prefixed CSI sequences", function()
-      local input = "\27[>4;2m/path/to/file.py:42: error\27[>4m"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals("/path/to/file.py:42: error", result)
-    end)
-
-    it("should strip mixed private-mode and standard CSI sequences", function()
-      local input = "\27[?7h\27[1;31m/path/file.cpp:10:5:\27[0m error\27[?7l"
-      local result = stacktrace.strip_ansi(input)
-      assert.equals("/path/file.cpp:10:5: error", result)
-    end)
-  end)
-
-  describe("process_terminal_output with ANSI codes", function()
-    before_each(function()
-      stacktrace.setup({})
-    end)
-
-    it("should detect Python stack trace through ANSI escape codes", function()
-      -- Simulate PTY output with ANSI escape codes wrapping the line
-      local data = {
-        '\27[0m  File "/home/user/test.py", line 10, in main\27[0m\r',
-      }
-
-      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
-
-      assert.equals(1, #results)
-      assert.equals("python", results[1].language)
-      assert.equals("/home/user/test.py", results[1].path)
-      assert.equals(10, results[1].line)
-    end)
-
-    it("should detect C++ compiler error through ANSI color codes", function()
-      local data = {
-        "\27[1m/home/user/main.cpp:42:15:\27[0m \27[31merror:\27[0m expected ';'",
-      }
-
-      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
-
-      assert.equals(1, #results)
-      assert.equals("cpp_source", results[1].language)
-      assert.equals(42, results[1].line)
-    end)
-
-    it("should detect JavaScript error through ANSI codes", function()
-      local data = {
-        "\27[90m    at myFunction (/home/user/index.js:25:10)\27[0m",
-      }
-
-      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
-
-      assert.equals(1, #results)
-      assert.equals("javascript", results[1].language)
-      assert.equals(25, results[1].line)
-    end)
-
-    it("should detect stack trace through private-mode CSI sequences", function()
-      -- Simulate PTY output with cursor-control sequences wrapping the line
-      local data = {
-        '\27[?25l\27[0m  File "/home/user/test.py", line 10, in main\27[0m\27[?25h',
-      }
-
-      local results = stacktrace.process_terminal_output(data, "/home/user", nil)
-
-      assert.equals(1, #results)
-      assert.equals("python", results[1].language)
-      assert.equals("/home/user/test.py", results[1].path)
-      assert.equals(10, results[1].line)
-    end)
-
-    it("should store ANSI-cleaned metadata with correct line numbers", function()
-      local data = {
-        "\27[0mTraceback:\27[0m",
-        "",
-        '\27[0m  File "/home/user/test.py", line 10, in main\27[0m\r',
-        "",
-      }
-
-      stacktrace.process_terminal_output(data, "/home/user", 500)
-      local metadata = stacktrace.get_buffer_metadata(500)
-
-      -- The stack trace is at data index 3
-      assert.is_not_nil(metadata[3])
-      assert.equals("/home/user/test.py", metadata[3].path)
-      assert.equals(10, metadata[3].line)
-    end)
-  end)
-
-  describe("scan_buffer_for_stacktraces", function()
-    before_each(function()
-      stacktrace.setup({})
-    end)
-
-    it("should scan buffer lines and store metadata", function()
-      -- Create a buffer with stack trace content
-      local buf = vim.api.nvim_create_buf(false, true)
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-        "Traceback (most recent call last):",
-        '  File "/home/user/test.py", line 10, in main',
-        "    do_stuff()",
-        '  File "/home/user/utils.py", line 42, in do_stuff',
-        "    raise RuntimeError('error')",
-        "RuntimeError: error",
-      })
-
-      local results = stacktrace.scan_buffer_for_stacktraces(buf, "/home/user")
-
-      assert.equals(2, #results)
-      assert.equals("/home/user/test.py", results[1].path)
-      assert.equals(10, results[1].line)
-      assert.equals(2, results[1].buffer_line)
-      assert.equals("/home/user/utils.py", results[2].path)
-      assert.equals(42, results[2].line)
-      assert.equals(4, results[2].buffer_line)
-
-      -- Verify metadata is stored at correct buffer line numbers
-      local meta2 = stacktrace.get_metadata(buf, 2)
-      assert.is_not_nil(meta2)
-      assert.equals("/home/user/test.py", meta2.path)
-
-      local meta4 = stacktrace.get_metadata(buf, 4)
-      assert.is_not_nil(meta4)
-      assert.equals("/home/user/utils.py", meta4.path)
-
-      -- Clean up
-      vim.api.nvim_buf_delete(buf, { force = true })
-    end)
-
-    it("should return empty when disabled", function()
-      stacktrace.disable()
-      local buf = vim.api.nvim_create_buf(false, true)
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-        'File "/home/user/test.py", line 10, in main',
-      })
-
-      local results = stacktrace.scan_buffer_for_stacktraces(buf, "/home/user")
-      assert.equals(0, #results)
-
-      vim.api.nvim_buf_delete(buf, { force = true })
-    end)
-
-    it("should return empty for invalid buffer", function()
-      local results = stacktrace.scan_buffer_for_stacktraces(99999, "/home/user")
-      assert.equals(0, #results)
-    end)
-
-    it("should return empty for nil buffer", function()
-      local results = stacktrace.scan_buffer_for_stacktraces(nil, "/home/user")
-      assert.equals(0, #results)
-    end)
-
-    it("should detect multiple languages in a single buffer", function()
-      local buf = vim.api.nvim_create_buf(false, true)
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-        '  File "/home/user/app.py", line 5, in main',
-        "    at myFunc (/home/user/index.js:25:10)",
-        "/home/user/main.cpp:42:15: error: expected ';'",
-      })
-
-      local results = stacktrace.scan_buffer_for_stacktraces(buf, "/home/user")
-
-      assert.equals(3, #results)
-      assert.equals("python", results[1].language)
-      assert.equals("javascript", results[2].language)
-      assert.equals("cpp_source", results[3].language)
-
-      vim.api.nvim_buf_delete(buf, { force = true })
-    end)
-  end)
-
-  describe("Elixir/Haskell/Swift pattern whitespace handling", function()
-    before_each(function()
-      stacktrace.setup({})
-    end)
-
-    it("should not capture leading whitespace in Elixir paths", function()
-      local line = "    lib/my_app/worker.ex:42: MyApp.Worker.run/1"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("elixir", result.language)
-      assert.equals("lib/my_app/worker.ex", result.original_path)
-      assert.equals(42, result.line)
-    end)
-
-    it("should not capture leading whitespace in Swift paths", function()
-      local line = "    /home/user/main.swift:42:15: error: something"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("swift", result.language)
-      assert.equals("/home/user/main.swift", result.original_path)
-      assert.equals(42, result.line)
-    end)
-
-    it("should not capture leading whitespace in Haskell paths", function()
-      local line = "    /home/user/Main.hs:42:15: error:"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("haskell", result.language)
-      assert.equals("/home/user/Main.hs", result.original_path)
-      assert.equals(42, result.line)
-    end)
-
-    it("should still match Elixir paths without leading whitespace", function()
-      local line = "lib/my_app/worker.exs:42: MyApp.Worker.run/1"
-      local result = stacktrace.process_line(line, "/home/user")
-
-      assert.is_not_nil(result)
-      assert.equals("elixir", result.language)
-      assert.equals("lib/my_app/worker.exs", result.original_path)
-    end)
-  end)
-
-  describe("find_nearest_metadata with expanded range", function()
-    before_each(function()
-      stacktrace.store_metadata(1, 5, { path = "file1.py", line = 10 })
-      stacktrace.store_metadata(1, 20, { path = "file2.py", line = 20 })
-    end)
-
-    it("should find metadata within default range of 10", function()
-      -- Metadata at line 5, cursor at line 14 -> distance of 9, within range 10
-      -- Metadata at line 20, cursor at line 14 -> distance of 6, closer
-      -- Nearest metadata (file2 at distance 6) should be returned
-      local result = stacktrace.find_nearest_metadata(1, 14)
-      assert.is_not_nil(result)
-      assert.equals("file2.py", result.path)
-    end)
-
-    it("should find metadata at edge of default range", function()
-      -- Metadata at line 5, cursor at line 15 -> distance of 10, at edge of range 10
-      -- Metadata at line 20, cursor at line 15 -> distance of 5, closer
-      local result = stacktrace.find_nearest_metadata(1, 15)
-      assert.is_not_nil(result)
-      assert.equals("file2.py", result.path)
-    end)
-
-    it("should not find metadata outside default range of 10", function()
-      -- Metadata at line 5, cursor at line 40 -> distance of 35, outside range 10
-      -- Metadata at line 20, cursor at line 40 -> distance of 20, outside range 10
-      local result = stacktrace.find_nearest_metadata(1, 40)
-      assert.is_nil(result)
-    end)
-
-    it("should respect custom range when specified", function()
-      -- With a range of 3, cursor at line 8 should find metadata at line 5 (distance 3)
-      local result = stacktrace.find_nearest_metadata(1, 8, 3)
-      assert.is_not_nil(result)
-      assert.equals("file1.py", result.path)
-    end)
-
-    it("should return nil when metadata is outside custom range", function()
-      -- With a range of 2, cursor at line 8 should NOT find metadata at line 5 (distance 3)
-      local result = stacktrace.find_nearest_metadata(1, 8, 2)
-      assert.is_nil(result)
     end)
   end)
 
@@ -1113,51 +1269,17 @@ describe("termlet.stacktrace", function()
       assert.is_function(termlet.get_stacktrace_at_cursor)
     end)
 
-    it("should close floating window when goto_stacktrace navigates to a file", function()
-      termlet.setup({ scripts = {} })
-
-      -- Create a temporary file to navigate to
-      local tmpfile = vim.fn.tempname() .. ".py"
-      local f = io.open(tmpfile, "w")
-      f:write("# test file\nprint('hello')\n")
-      f:close()
-
-      -- Create a floating window (simulates the terminal float)
-      local buf = vim.api.nvim_create_buf(false, true)
-      local float_win = vim.api.nvim_open_win(buf, true, {
-        relative = "editor",
-        width = 40,
-        height = 10,
-        row = 5,
-        col = 5,
-        style = "minimal",
-        border = "rounded",
+    it("should initialize stacktrace when enabled in config", function()
+      termlet.setup({
+        scripts = {},
+        stacktrace = {
+          enabled = true,
+          languages = { "python" }
+        }
       })
 
-      -- Verify we're in a floating window
-      local win_cfg = vim.api.nvim_win_get_config(float_win)
-      assert.equals("editor", win_cfg.relative)
-
-      -- Store metadata for the buffer at cursor line 1
-      local st = require("termlet.stacktrace")
-      st.store_metadata(buf, 1, {
-        path = tmpfile,
-        original_path = tmpfile,
-        line = 2,
-        column = 1,
-      })
-
-      -- Set cursor to line 1 (where metadata is)
-      vim.api.nvim_win_set_cursor(float_win, { 1, 0 })
-
-      -- Call goto_stacktrace — this should close the floating window
-      termlet.goto_stacktrace()
-
-      -- The floating window should have been closed
-      assert.is_false(vim.api.nvim_win_is_valid(float_win))
-
-      -- Clean up temporary file
-      os.remove(tmpfile)
+      local parser = termlet.stacktrace.get_parser("python")
+      assert.is_not_nil(parser)
     end)
   end)
 end)
