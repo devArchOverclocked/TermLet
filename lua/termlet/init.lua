@@ -761,16 +761,6 @@ function M.list_scripts()
   vim.notify("Available scripts:\n" .. table.concat(script_list, "\n"), vim.log.levels.INFO)
 end
 
--- Backwards compatibility
-M.open_floating_terminal = function()
-  vim.notify("open_floating_terminal is deprecated, use create_floating_terminal", vim.log.levels.WARN)
-  return M.create_floating_terminal()
-end
-
-M.close_build_window = function()
-  vim.notify("close_build_window is deprecated, use close_terminal", vim.log.levels.WARN)
-  return M.close_terminal()
-end
 
 -- Open the interactive script menu
 function M.open_menu()
