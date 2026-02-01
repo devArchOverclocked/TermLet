@@ -1320,5 +1320,63 @@ describe("termlet.stacktrace", function()
       local parser = termlet.stacktrace.get_parser("python")
       assert.is_not_nil(parser)
     end)
+
+    it("should detect MSBuild errors in terminal buffer via goto_stacktrace", function()
+      termlet.setup({
+        scripts = {},
+        stacktrace = {
+          enabled = true,
+          -- Empty languages array should load all parsers (including csharp)
+          languages = {}
+        }
+      })
+
+      -- Create a buffer with MSBuild error output
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {
+        "Building project...",
+        "CCSO/engines/bv/Engine.cs(20,19): error CS1061: 'BVEngine' does not contain a definition for 'Run2'",
+        "Build failed."
+      }
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+      -- Simulate stacktrace detection (as would happen in terminal output processing)
+      local cwd = vim.fn.getcwd()
+      local results = termlet.stacktrace.scan_buffer_for_stacktraces(buf, cwd)
+
+      -- Verify that the MSBuild error was detected
+      assert.are.equal(1, #results)
+      assert.are.equal("CCSO/engines/bv/Engine.cs", results[1].file_path)
+      assert.are.equal(20, results[1].line_number)
+      assert.are.equal(19, results[1].column_number)
+
+      -- Verify metadata was stored at the correct line (line 2)
+      local file_info = termlet.stacktrace.find_nearest_metadata(buf, 2)
+      assert.is_not_nil(file_info)
+      assert.are.equal("CCSO/engines/bv/Engine.cs", file_info.file_path)
+      assert.are.equal(20, file_info.line_number)
+      assert.are.equal(19, file_info.column_number)
+
+      -- Cleanup
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should load all built-in parsers when languages array is empty", function()
+      termlet.setup({
+        scripts = {},
+        stacktrace = {
+          enabled = true,
+          languages = {} -- Should load all parsers
+        }
+      })
+
+      -- Verify that csharp parser is loaded
+      local csharp_parser = termlet.stacktrace.get_parser("csharp")
+      assert.is_not_nil(csharp_parser, "C# parser should be loaded when languages={}")
+
+      -- Verify other common parsers are also loaded
+      local python_parser = termlet.stacktrace.get_parser("python")
+      assert.is_not_nil(python_parser, "Python parser should be loaded when languages={}")
+    end)
   end)
 end)

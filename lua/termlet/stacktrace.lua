@@ -23,6 +23,9 @@ local buffer_metadata = {}
 -- Output buffer for multi-line detection
 local output_buffer = {}
 
+-- Load highlight module once at module level with pcall guard
+local highlight_ok, highlight_module = pcall(require, "termlet.highlight")
+
 ---Register a new stack trace pattern for a language
 ---@param language string The language identifier (e.g., 'python', 'csharp')
 ---@param pattern_config table Pattern configuration
@@ -327,8 +330,21 @@ function M.process_terminal_output(data, cwd, buffer_id)
       local cleaned_line = M.strip_ansi(line)
       add_to_buffer(cleaned_line)
 
-      local file_info = M.process_line(cleaned_line, cwd)
+      -- Use parse_line if available (from parser plugin), otherwise fall back to process_line
+      local file_info = M.parse_line and M.parse_line(cleaned_line, cwd) or M.process_line(cleaned_line, cwd)
       if file_info then
+        -- Normalize parser plugin format to match expected format
+        -- Parser plugin returns: { file_path, line_number, column_number, parser_name }
+        -- Expected format: { path, original_path, line, column, context }
+        if file_info.file_path and not file_info.path then
+          -- Extract original path from the line (before path resolution)
+          -- For now, use file_path as both (parser resolves path internally)
+          file_info.original_path = file_info.file_path
+          file_info.path = file_info.file_path
+          file_info.line = file_info.line_number
+          file_info.column = file_info.column_number
+          file_info.raw_line = cleaned_line
+        end
         local buffer_line = terminal_line_count + line_offset
         file_info.buffer_line = buffer_line
         table.insert(results, file_info)
@@ -336,6 +352,21 @@ function M.process_terminal_output(data, cwd, buffer_id)
         -- Store in buffer metadata keyed on actual terminal buffer line number
         if buffer_id then
           M.store_metadata(buffer_id, buffer_line, file_info)
+
+          -- Apply highlighting if available
+          -- We need to use vim.schedule because we're in a callback and need to
+          -- wait for the line to be fully rendered in the terminal buffer
+          if highlight_ok and highlight_module.is_enabled() then
+            vim.schedule(function()
+              if vim.api.nvim_buf_is_valid(buffer_id) then
+                -- Get the actual line text from the buffer
+                local lines = vim.api.nvim_buf_get_lines(buffer_id, buffer_line - 1, buffer_line, false)
+                if #lines > 0 then
+                  highlight_module.highlight_stacktrace_line(buffer_id, buffer_line, lines[1], file_info)
+                end
+              end
+            end)
+          end
         end
       end
     end
@@ -436,11 +467,29 @@ function M.scan_buffer_for_stacktraces(buffer_id, cwd)
 
   for i, line in ipairs(lines) do
     if line and line ~= "" then
-      local file_info = M.process_line(line, cwd)
+      -- Use parse_line if available (from parser plugin), otherwise fall back to process_line
+      local file_info = M.parse_line and M.parse_line(line, cwd) or M.process_line(line, cwd)
       if file_info then
+        -- Normalize parser plugin format to match expected format
+        -- Parser plugin returns: { file_path, line_number, column_number, parser_name }
+        -- Expected format: { path, original_path, line, column, context }
+        if file_info.file_path and not file_info.path then
+          -- Extract original path from the line (before path resolution)
+          -- For now, use file_path as both (parser resolves path internally)
+          file_info.original_path = file_info.file_path
+          file_info.path = file_info.file_path
+          file_info.line = file_info.line_number
+          file_info.column = file_info.column_number
+          file_info.raw_line = line
+        end
         file_info.buffer_line = i
         table.insert(results, file_info)
         M.store_metadata(buffer_id, i, file_info)
+
+        -- Apply highlighting if available
+        if highlight_ok and highlight_module.is_enabled() then
+          highlight_module.highlight_stacktrace_line(buffer_id, i, line, file_info)
+        end
       end
     end
   end
