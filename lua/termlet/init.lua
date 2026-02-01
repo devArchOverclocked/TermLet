@@ -54,6 +54,7 @@ local config = {
     },
     exclude_hidden = true,
     exclude_patterns = {},
+    max_depth = 5, -- Maximum recursion depth for searching
   },
   menu = {
     width_ratio = 0.6,
@@ -284,12 +285,30 @@ function M.create_floating_terminal(opts)
 end
 
 -- Find script by filename, searching from a specified root directory
+-- Supports:
+--   1. Absolute paths (starting with / or ~) - used directly
+--   2. Relative paths with directory components (e.g., "subdir/script.sh") - resolved from root
+--   3. Plain filenames (e.g., "build.sh") - searched recursively from root
 function M.find_script_by_name(filename, root_dir, search_dirs)
   if not filename then
     debug_log("Missing filename")
     return nil
   end
-  
+
+  -- Expand ~ in filename for absolute path detection
+  local expanded_filename = vim.fn.expand(filename)
+
+  -- Check if filename is an absolute path
+  if expanded_filename:sub(1, 1) == "/" then
+    debug_log("Filename is an absolute path: " .. expanded_filename)
+    if vim.fn.filereadable(expanded_filename) == 1 then
+      debug_log("Found script at absolute path: " .. expanded_filename)
+      return expanded_filename
+    end
+    debug_log("Absolute path not found: " .. expanded_filename)
+    return nil
+  end
+
   -- Determine root directory
   local search_root
   if root_dir then
@@ -308,18 +327,21 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
     end
     search_root = vim.fn.fnamemodify(current_file, ":h")
   end
-  
+
   debug_log("Starting search from root: " .. search_root)
-  
+
   -- Default search directories if none specified
   search_dirs = search_dirs or {
-    "scripts", "bin", "tools", "build", ".scripts", 
+    "scripts", "bin", "tools", "build", ".scripts",
     "dev", "development", "utils", "automation"
   }
-  
+
+  -- Get maximum search depth from config
+  local max_search_depth = config.search.max_depth or 5
+
   -- Function to recursively search for file in a directory
   local function search_in_dir(dir_path, target_file, max_depth)
-    max_depth = max_depth or 5 -- Increased depth for root-based search
+    max_depth = max_depth or max_search_depth
     if max_depth <= 0 then return nil end
 
     -- Check if the target file itself is excluded by patterns
@@ -333,14 +355,14 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
       debug_log("Found script at: " .. full_path)
       return full_path
     end
-    
+
     -- Search in subdirectories
     local handle = vim.loop.fs_scandir(dir_path)
     if handle then
       while true do
         local name, type = vim.loop.fs_scandir_next(handle)
         if not name then break end
-        
+
         if type == "directory" then
           if should_exclude_dir(name, config.search) then
             debug_log("Skipping excluded directory: " .. dir_path .. "/" .. name)
@@ -354,11 +376,12 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
         end
       end
     end
-    
+
     return nil
   end
-  
-  -- First, try direct search in root directory
+
+  -- First, try direct path relative to root (handles both plain filenames
+  -- and relative paths with directory components like "subdir/script.sh")
   if not should_exclude_file(filename, config.search) then
     local direct_path = search_root .. "/" .. filename
     if vim.fn.filereadable(direct_path) == 1 then
@@ -368,22 +391,26 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   else
     debug_log("Skipping excluded file in direct search: " .. filename)
   end
-  
+
+  -- Extract the basename for recursive searching
+  -- This allows "subdir/build.sh" to find "build.sh" anywhere in root tree
+  local basename = vim.fn.fnamemodify(filename, ":t")
+
   -- Then search in common script directories within root
   for _, search_dir in ipairs(search_dirs) do
     local search_path = search_root .. "/" .. search_dir
     if vim.fn.isdirectory(search_path) == 1 then
       debug_log("Searching in directory: " .. search_path)
-      local result = search_in_dir(search_path, filename, 5)
+      local result = search_in_dir(search_path, basename, max_search_depth)
       if result then return result end
     end
   end
-  
+
   -- Finally, do a recursive search from root (as fallback)
   debug_log("Doing recursive search from root: " .. search_root)
-  local result = search_in_dir(search_root, filename, 5)
+  local result = search_in_dir(search_root, basename, max_search_depth)
   if result then return result end
-  
+
   debug_log("Script '" .. filename .. "' not found in root directory: " .. search_root)
   return nil
 end

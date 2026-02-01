@@ -169,6 +169,175 @@ describe("termlet", function()
     end)
   end)
 
+  describe("find_script_by_name", function()
+    local test_root
+
+    before_each(function()
+      -- Create a temporary directory structure for testing
+      test_root = vim.fn.tempname()
+      vim.fn.mkdir(test_root, "p")
+    end)
+
+    after_each(function()
+      -- Clean up temp directories
+      if test_root and vim.fn.isdirectory(test_root) == 1 then
+        vim.fn.delete(test_root, "rf")
+      end
+    end)
+
+    -- Helper to create a file in a path relative to test_root
+    local function create_test_file(relative_path)
+      local full_path = test_root .. "/" .. relative_path
+      local dir = vim.fn.fnamemodify(full_path, ":h")
+      vim.fn.mkdir(dir, "p")
+      vim.fn.writefile({ "#!/bin/bash", "echo hello" }, full_path)
+      return full_path
+    end
+
+    it("should return nil when filename is nil", function()
+      local result = termlet.find_script_by_name(nil, test_root)
+      assert.is_nil(result)
+    end)
+
+    it("should return nil when root_dir does not exist", function()
+      local result = termlet.find_script_by_name("test.sh", "/nonexistent/path/12345")
+      assert.is_nil(result)
+    end)
+
+    it("should find a file directly in root directory", function()
+      local expected = create_test_file("build.sh")
+      local result = termlet.find_script_by_name("build.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should find a file in a subdirectory recursively", function()
+      local expected = create_test_file("scripts/deploy.sh")
+      local result = termlet.find_script_by_name("deploy.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should find a file in a deeply nested subdirectory", function()
+      local expected = create_test_file("a/b/c/deep_script.sh")
+      local result = termlet.find_script_by_name("deep_script.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should find a file using absolute path", function()
+      local expected = create_test_file("somewhere/abs_test.sh")
+      -- Use the absolute path directly as the filename
+      local result = termlet.find_script_by_name(expected, test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should return nil for nonexistent absolute path", function()
+      local result = termlet.find_script_by_name("/nonexistent/path/fake.sh", test_root)
+      assert.is_nil(result)
+    end)
+
+    it("should find a file with relative path containing directory components", function()
+      local expected = create_test_file("subdir/build.sh")
+      -- Provide the relative path with directory component
+      local result = termlet.find_script_by_name("subdir/build.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should recursively find basename when relative path does not match directly", function()
+      -- File is at nested/deep/run.sh, but user specifies "other/run.sh" which doesn't exist
+      local expected = create_test_file("nested/deep/run.sh")
+      local result = termlet.find_script_by_name("nonexistent_dir/run.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should prefer direct path match over recursive search", function()
+      -- Create the file both in root and in a subdirectory
+      local expected = create_test_file("script.sh")
+      create_test_file("subdir/script.sh")
+      local result = termlet.find_script_by_name("script.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should find files in common script directories", function()
+      local expected = create_test_file("scripts/lint.sh")
+      local result = termlet.find_script_by_name("lint.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should find files in custom search directories", function()
+      local expected = create_test_file("custom_dir/special.sh")
+      local result = termlet.find_script_by_name("special.sh", test_root, { "custom_dir" })
+      assert.are.equal(expected, result)
+    end)
+
+    it("should not find files in hidden directories during recursive search", function()
+      -- Create file only in a hidden directory
+      create_test_file(".hidden/secret.sh")
+      local result = termlet.find_script_by_name("secret.sh", test_root)
+      assert.is_nil(result)
+    end)
+
+    it("should not find files in node_modules during recursive search", function()
+      create_test_file("node_modules/pkg/script.sh")
+      local result = termlet.find_script_by_name("script.sh", test_root)
+      assert.is_nil(result)
+    end)
+
+    it("should return nil when file does not exist anywhere", function()
+      create_test_file("other.sh")
+      local result = termlet.find_script_by_name("nonexistent.sh", test_root)
+      assert.is_nil(result)
+    end)
+
+    it("should find file in nested subdirectory when only root_dir is specified", function()
+      -- This is the core use case from issue #34: user provides only root_dir,
+      -- and termlet recursively finds the file
+      local expected = create_test_file("src/scripts/helpers/deploy.sh")
+      local result = termlet.find_script_by_name("deploy.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should not search beyond max depth of 5", function()
+      -- Create a file nested 7 levels deep (beyond depth limit of 5)
+      create_test_file("a/b/c/d/e/f/g/too_deep.sh")
+      local result = termlet.find_script_by_name("too_deep.sh", test_root)
+      assert.is_nil(result)
+    end)
+
+    it("should find file exactly at max depth", function()
+      -- Depth 1=root check, then 4 subdirectory levels = depth 5
+      local expected = create_test_file("a/b/c/d/at_limit.sh")
+      local result = termlet.find_script_by_name("at_limit.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should handle filename without extension", function()
+      local expected = create_test_file("build")
+      local result = termlet.find_script_by_name("build", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should find file in multiple search directories and return first match", function()
+      -- Create file in two different common directories
+      local expected_scripts = create_test_file("scripts/run.sh")
+      create_test_file("bin/run.sh")
+      -- "scripts" comes before "bin" in default search_dirs, so it should be found first
+      local result = termlet.find_script_by_name("run.sh", test_root)
+      assert.are.equal(expected_scripts, result)
+    end)
+
+    it("should find file in tools directory with explicit root_dir", function()
+      -- Create file in a known root
+      local expected = create_test_file("tools/check.sh")
+      local result = termlet.find_script_by_name("check.sh", test_root)
+      assert.are.equal(expected, result)
+    end)
+
+    it("should not search in .git directory", function()
+      create_test_file(".git/hooks/pre-commit.sh")
+      local result = termlet.find_script_by_name("pre-commit.sh", test_root)
+      assert.is_nil(result)
+    end)
+  end)
+
   describe("format_terminal_title", function()
     it("should format title with default template", function()
       local cfg = {
@@ -982,6 +1151,17 @@ describe("termlet", function()
       assert.is_true(termlet._should_exclude_file("vendor.bundle.js", nil))
       assert.is_false(termlet._should_exclude_file("app.js", nil))
     end)
+
+    it("should allow configuring max_depth", function()
+      termlet.setup({
+        scripts = {},
+        search = {
+          max_depth = 10,
+        },
+      })
+      -- Just verify it doesn't error - actual depth testing is in integration tests
+      assert.is_not_nil(termlet)
+    end)
   end)
 
   describe("find_script_by_name file exclusion integration", function()
@@ -1081,6 +1261,84 @@ describe("termlet", function()
       local result = termlet.find_script_by_name("run.sh", tmpdir, { "scripts" })
       assert.is_not_nil(result)
       assert.is_truthy(result:find("run.sh", 1, true))
+    end)
+  end)
+
+  describe("find_script_by_name recursive search depth", function()
+    local tmpdir
+
+    before_each(function()
+      tmpdir = vim.fn.tempname()
+      vim.fn.mkdir(tmpdir, "p")
+    end)
+
+    after_each(function()
+      vim.fn.delete(tmpdir, "rf")
+    end)
+
+    it("should find files in deeply nested directories within max_depth", function()
+      -- Create a deeply nested directory structure (3 levels)
+      local deep_dir = tmpdir .. "/level1/level2/level3"
+      vim.fn.mkdir(deep_dir, "p")
+      local script_path = deep_dir .. "/deep_script.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho deep\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = { exclude_dirs = {}, exclude_hidden = false, max_depth = 5 },
+      })
+
+      local result = termlet.find_script_by_name("deep_script.sh", tmpdir, {})
+      assert.is_not_nil(result)
+      assert.is_truthy(result:find("deep_script.sh", 1, true))
+    end)
+
+    it("should not find files deeper than max_depth", function()
+      -- Create a directory structure deeper than max_depth
+      local deep_dir = tmpdir .. "/l1/l2/l3/l4/l5/l6/l7"
+      vim.fn.mkdir(deep_dir, "p")
+      local script_path = deep_dir .. "/too_deep.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho deep\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = {},
+          exclude_hidden = false,
+          max_depth = 3, -- Only search 3 levels deep
+        },
+      })
+
+      local result = termlet.find_script_by_name("too_deep.sh", tmpdir, {})
+      -- Should not find it because it's too deep (7 levels > 3)
+      assert.is_nil(result)
+    end)
+
+    it("should find files exactly at max_depth", function()
+      -- Create a directory structure at exactly max_depth
+      local shallow_dir = tmpdir .. "/l1/l2"
+      vim.fn.mkdir(shallow_dir, "p")
+      local script_path = shallow_dir .. "/shallow.sh"
+      local f = io.open(script_path, "w")
+      f:write("#!/bin/bash\necho shallow\n")
+      f:close()
+
+      termlet.setup({
+        scripts = {},
+        search = {
+          exclude_dirs = {},
+          exclude_hidden = false,
+          max_depth = 3,
+        },
+      })
+
+      local result = termlet.find_script_by_name("shallow.sh", tmpdir, {})
+      assert.is_not_nil(result)
+      assert.is_truthy(result:find("shallow.sh", 1, true))
     end)
   end)
 
