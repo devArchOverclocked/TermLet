@@ -602,7 +602,16 @@ local function execute_script(script)
             execution_time = execution_time,
             timestamp = os.time(),
             working_dir = cwd,
-            script = script, -- Store script config for re-running
+            script = {
+              name = script.name,
+              filename = script.filename,
+              root_dir = script.root_dir,
+              dir_name = script.dir_name,
+              relative_path = script.relative_path,
+              cmd = script.cmd,
+              search_dirs = script.search_dirs,
+              description = script.description,
+            },
           })
         end
       end)
@@ -1232,7 +1241,7 @@ function M.show_history()
     else
       vim.notify("Script configuration not found in history", vim.log.levels.ERROR)
     end
-  end, config.history)
+  end)
 end
 
 --- Close the history browser

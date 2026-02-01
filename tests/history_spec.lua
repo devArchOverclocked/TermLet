@@ -13,7 +13,7 @@ describe("termlet.history", function()
 
   after_each(function()
     -- Clean up
-    if history.is_open then
+    if history.is_open() then
       history.close()
     end
     history.clear_history()

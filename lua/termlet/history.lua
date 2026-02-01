@@ -56,7 +56,7 @@ end
 --- Get all history entries
 ---@return table List of history entries
 function M.get_entries()
-  return state.entries
+  return { unpack(state.entries) }
 end
 
 --- Get the most recent history entry
@@ -242,15 +242,15 @@ local function render_history()
       if entry.exit_code == 0 then
         table.insert(highlights, {
           line = #lines - 1,
-          col_start = is_selected and 4 or 4,
-          col_end = is_selected and 5 or 5,
+          col_start = 4,
+          col_end = 7,
           group = state.config.highlight.success
         })
       else
         table.insert(highlights, {
           line = #lines - 1,
-          col_start = is_selected and 4 or 4,
-          col_end = is_selected and 5 or 5,
+          col_start = 4,
+          col_end = 7,
           group = state.config.highlight.error
         })
       end
