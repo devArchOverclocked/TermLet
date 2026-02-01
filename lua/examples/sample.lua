@@ -109,6 +109,21 @@ return {
 				end,
 				desc = "TermLet: Toggle Keybinding Config",
 			},
+			-- Filter management keybindings
+			{
+				"<leader>tf",
+				function()
+					require("termlet").open_filter_ui()
+				end,
+				desc = "TermLet: Open filter UI",
+			},
+			{
+				"<leader>tF",
+				function()
+					require("termlet").toggle_filters()
+				end,
+				desc = "TermLet: Toggle filters",
+			},
 		},
 	},
 }

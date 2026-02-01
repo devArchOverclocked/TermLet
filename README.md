@@ -15,6 +15,7 @@
 * 😹 **Terminal cleanup** and safe resource handling
 * 🔍 **Stack trace detection** — automatically detect file references in error output and jump to source
 * 💾 **Output persistence** — preserve terminal output after window closes for later review
+* 🎯 **Smart output filtering** — filter terminal output by patterns and highlight important messages
 * 🧪 **Debug-friendly** with verbose logging option
 
 ---
@@ -89,6 +90,12 @@ Here's the full configuration structure:
     position = "bottom",          -- "bottom", "center", "top"
     output_persistence = "none",  -- "none" | "buffer"
     max_saved_buffers = 5,        -- Maximum number of hidden buffers to keep
+    filters = {
+      enabled = false,            -- Enable output filtering
+      show_only = {},             -- Only show lines matching these patterns
+      hide = {},                  -- Hide lines matching these patterns
+      highlight = {},             -- Custom highlighting: { pattern = "ERROR", color = "#ff0000" }
+    },
   },
   menu = {
     width_ratio = 0.6,  -- Menu window width (fraction of screen)
@@ -403,6 +410,164 @@ print(bindings["build"]) -- "<leader>b"
 require("termlet").open_keybindings()
 require("termlet").close_keybindings()
 require("termlet").toggle_keybindings()
+```
+
+---
+
+## 🎯 Smart Output Filtering and Highlighting
+
+TermLet can filter terminal output by patterns and apply custom syntax highlighting to warnings, errors, and important messages. This helps you quickly spot issues in verbose output from long-running scripts.
+
+### Use Cases
+
+- **Long build processes** - Filter to show only errors and warnings
+- **Test suites** - Highlight failures and hide verbose debug output
+- **Log analysis** - Focus on specific log levels (ERROR, WARNING, INFO)
+- **CI/CD pipelines** - Quickly identify deployment issues
+
+### Configuration
+
+Configure filters globally or per-script:
+
+```lua
+require("termlet").setup({
+  scripts = {
+    {
+      name = "build",
+      filename = "build.sh",
+      filters = {
+        enabled = true,
+        show_only = { "error", "warning" }, -- Only show matching lines
+        hide = { "debug", "verbose" },      -- Hide matching lines
+        highlight = {
+          { pattern = "ERROR", color = "#ff0000" },
+          { pattern = "WARNING", color = "#ffaa00" },
+          { pattern = "SUCCESS", color = "#00ff00" },
+        }
+      }
+    }
+  }
+})
+```
+
+### Interactive Filter Mode
+
+Press `/` in a terminal window to enter interactive filter mode:
+
+```lua
+vim.keymap.set("t", "/", function()
+  require("termlet").open_filter_ui()
+end, { desc = "Open filter UI" })
+```
+
+The filter UI provides quick presets:
+- **All** - Show all output (hide debug/verbose)
+- **Errors** - Show only errors
+- **Warnings** - Show only warnings
+- **Info** - Show only info/success messages
+
+### API Functions
+
+```lua
+-- Apply a filter preset
+require("termlet").apply_filter_preset("errors")
+
+-- Toggle filters on/off
+require("termlet").toggle_filters()
+
+-- Clear filters
+require("termlet").clear_filters()
+
+-- Reapply current filters
+require("termlet").reapply_filters()
+
+-- Open interactive filter UI
+require("termlet").open_filter_ui()
+```
+
+### Example Keybindings
+
+```lua
+-- Open filter UI in terminal mode
+vim.keymap.set("t", "/", function()
+  require("termlet").open_filter_ui()
+end, { desc = "Open filter UI" })
+
+-- Toggle filters in terminal mode
+vim.keymap.set("t", "<C-f>", function()
+  require("termlet").toggle_filters()
+end, { desc = "Toggle filters" })
+
+-- Quick presets in normal mode (when in terminal buffer)
+vim.keymap.set("n", "<leader>fe", function()
+  require("termlet").apply_filter_preset("errors")
+end, { desc = "Filter: Errors only" })
+
+vim.keymap.set("n", "<leader>fw", function()
+  require("termlet").apply_filter_preset("warnings")
+end, { desc = "Filter: Warnings only" })
+
+vim.keymap.set("n", "<leader>fa", function()
+  require("termlet").apply_filter_preset("all")
+end, { desc = "Filter: All (hide debug)" })
+```
+
+### Filter Patterns
+
+Filters support case-insensitive substring matching:
+
+```lua
+filters = {
+  enabled = true,
+  -- Show only lines containing these patterns (case-insensitive)
+  show_only = { "error", "fail", "exception" },
+
+  -- Hide lines containing these patterns (case-insensitive)
+  hide = { "debug", "trace", "verbose" },
+
+  -- Highlight patterns with custom colors
+  highlight = {
+    { pattern = "error", color = "#ff0000" },      -- Red
+    { pattern = "warning", color = "#ffaa00" },    -- Orange
+    { pattern = "success", color = "#00ff00" },    -- Green
+    { pattern = "info", color = "#00aaff" },       -- Blue
+  }
+}
+```
+
+**Note:** When both `show_only` and `hide` are specified, a line must match `show_only` AND not match `hide` to be shown.
+
+### Per-Script Filters
+
+Each script can have its own filter configuration:
+
+```lua
+scripts = {
+  {
+    name = "build",
+    filename = "build.sh",
+    filters = {
+      enabled = true,
+      show_only = { "error", "warning" },
+      highlight = {
+        { pattern = "error", color = "#ff0000" },
+        { pattern = "warning", color = "#ffaa00" },
+      }
+    }
+  },
+  {
+    name = "test",
+    filename = "test.sh",
+    filters = {
+      enabled = true,
+      hide = { "debug", "[PASS]" },
+      highlight = {
+        { pattern = "[FAIL]", color = "#ff0000" },
+        { pattern = "[SKIP]", color = "#ffaa00" },
+      }
+    }
+  }
+}
 ```
 
 ---
