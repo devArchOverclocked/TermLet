@@ -537,6 +537,8 @@ filters = {
 
 **Note:** When both `show_only` and `hide` are specified, a line must match `show_only` AND not match `hide` to be shown.
 
+**Non-destructive:** Filtering is fully reversible. Original output is cached and restored when you toggle filters off or clear them. Stack trace metadata remains valid across filter changes.
+
 ### Per-Script Filters
 
 Each script can have its own filter configuration:

@@ -1,12 +1,12 @@
 -- Output filtering and highlighting module
--- Provides filtering and custom highlighting for terminal output
+-- Provides non-destructive filtering and custom highlighting for terminal output
 -- lua/termlet/filter.lua
 
 local M = {}
 
 -- Default configuration
 local config = {
-  enabled = true,
+  enabled = false,
   show_only = {},      -- Only show lines matching these patterns
   hide = {},           -- Hide lines matching these patterns
   highlight = {},      -- Custom highlighting rules
@@ -14,6 +14,10 @@ local config = {
 
 -- Namespace for extmarks
 local ns_id = nil
+
+-- Cache of original unfiltered lines per buffer
+-- Stores the full original content so it can be restored when filters are toggled off
+local original_lines_cache = {}
 
 -- Initialize the module
 local function init()
@@ -121,8 +125,8 @@ function M.highlight_line(bufnr, line_num, line_text, highlight_rules)
     local hl_name = "TermLetFilter_" .. match.color:gsub("#", "")
 
     -- Define the highlight group if it doesn't exist
-    local exists = pcall(vim.api.nvim_get_hl, 0, { name = hl_name })
-    if not exists then
+    local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = hl_name })
+    if not ok or vim.tbl_isempty(hl) then
       vim.api.nvim_set_hl(0, hl_name, { fg = match.color })
     end
 
@@ -134,7 +138,9 @@ function M.highlight_line(bufnr, line_num, line_text, highlight_rules)
   end
 end
 
--- Filter and highlight terminal output
+-- Filter and highlight terminal output (non-destructive)
+-- Stores original lines in cache before replacing buffer content.
+-- Original lines can be restored via restore_buffer().
 -- @param bufnr number The buffer number
 -- @param filters table Filter configuration
 -- @return number Number of lines hidden
@@ -148,37 +154,65 @@ function M.apply_filters(bufnr, filters)
   end
 
   -- Clear previous highlights
-  M.clear_buffer(bufnr)
+  M.clear_highlights(bufnr)
 
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  -- Use cached original lines if available, otherwise read from buffer
+  local lines = original_lines_cache[bufnr]
+  if not lines then
+    lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    original_lines_cache[bufnr] = lines
+  end
+
   local hidden_count = 0
   local new_lines = {}
 
-  for i, line in ipairs(lines) do
+  for _, line in ipairs(lines) do
     if should_show_line(line, filters) then
       table.insert(new_lines, line)
-      -- Apply highlighting to the line at its new position
-      if filters.highlight and #filters.highlight > 0 then
-        M.highlight_line(bufnr, #new_lines, line, filters.highlight)
-      end
     else
       hidden_count = hidden_count + 1
     end
   end
 
-  -- Only update buffer if we actually filtered lines
+  -- Update buffer content with filtered lines
   if hidden_count > 0 then
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
-  else
-    -- Just apply highlights without filtering
-    if filters.highlight and #filters.highlight > 0 then
-      for i, line in ipairs(lines) do
-        M.highlight_line(bufnr, i, line, filters.highlight)
-      end
+  end
+
+  -- Apply highlights to the visible lines
+  if filters.highlight and #filters.highlight > 0 then
+    local visible_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    for i, line in ipairs(visible_lines) do
+      M.highlight_line(bufnr, i, line, filters.highlight)
     end
   end
 
   return hidden_count
+end
+
+-- Restore original unfiltered buffer content
+-- @param bufnr number The buffer number
+-- @return boolean True if buffer was restored
+function M.restore_buffer(bufnr)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  local cached = original_lines_cache[bufnr]
+  if not cached then
+    return false
+  end
+
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, cached)
+  original_lines_cache[bufnr] = nil
+  return true
+end
+
+-- Check if a buffer has cached original lines
+-- @param bufnr number The buffer number
+-- @return boolean True if original lines are cached
+function M.has_original_lines(bufnr)
+  return original_lines_cache[bufnr] ~= nil
 end
 
 -- Process a single line for real-time filtering
@@ -200,9 +234,9 @@ function M.process_line(line, filters)
   return show, highlights
 end
 
--- Clear all filter highlights from a buffer
+-- Clear all filter highlights from a buffer (does not touch content)
 -- @param bufnr number The buffer number
-function M.clear_buffer(bufnr)
+function M.clear_highlights(bufnr)
   if not ns_id then
     return
   end
@@ -214,17 +248,30 @@ function M.clear_buffer(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
 end
 
--- Clear all filter highlights from all buffers
-function M.clear_all()
-  if not ns_id then
-    return
-  end
+-- Clear buffer: restore original lines and remove highlights
+-- @param bufnr number The buffer number
+function M.clear_buffer(bufnr)
+  M.clear_highlights(bufnr)
+  M.restore_buffer(bufnr)
+end
 
-  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+-- Clear all filter highlights from all buffers and discard caches
+function M.clear_all()
+  if ns_id then
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+      end
     end
   end
+
+  original_lines_cache = {}
+end
+
+-- Discard the original lines cache for a buffer
+-- @param bufnr number The buffer number
+function M.discard_cache(bufnr)
+  original_lines_cache[bufnr] = nil
 end
 
 -- Toggle filter enabled state
@@ -241,6 +288,7 @@ function M.toggle_enabled(bufnr, filters)
   if filters.enabled then
     M.apply_filters(bufnr, filters)
   else
+    -- Restore original content and clear highlights
     M.clear_buffer(bufnr)
   end
 

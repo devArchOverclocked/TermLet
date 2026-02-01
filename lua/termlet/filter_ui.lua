@@ -38,6 +38,7 @@ function M.close()
 end
 
 -- Render the filter UI content
+-- Must be called with modifiable toggled on for the UI buffer
 local function render_ui()
   if not ui_state.buf or not vim.api.nvim_buf_is_valid(ui_state.buf) then
     return
@@ -68,10 +69,12 @@ local function render_ui()
   table.insert(lines, "│                                   │")
   table.insert(lines, "└───────────────────────────────────┘")
 
+  vim.api.nvim_set_option_value("modifiable", true, { buf = ui_state.buf })
   vim.api.nvim_buf_set_lines(ui_state.buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = ui_state.buf })
 end
 
--- Apply the current preset
+-- Apply the current preset to the target buffer directly (no buffer switching)
 local function apply_current_preset()
   if not ui_state.target_buf or not vim.api.nvim_buf_is_valid(ui_state.target_buf) then
     vim.notify("Target buffer is no longer valid", vim.log.levels.ERROR)
@@ -80,16 +83,7 @@ local function apply_current_preset()
   end
 
   local termlet = require("termlet")
-  local current_buf = vim.api.nvim_get_current_buf()
-
-  -- Temporarily switch context to target buffer
-  local original_buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_set_current_buf(ui_state.target_buf)
-
-  termlet.apply_filter_preset(ui_state.current_preset)
-
-  -- Restore original context
-  vim.api.nvim_set_current_buf(original_buf)
+  termlet.apply_filter_preset_to_buf(ui_state.target_buf, ui_state.current_preset)
 end
 
 -- Setup keybindings for the filter UI
@@ -118,10 +112,7 @@ local function setup_keybindings()
   vim.keymap.set("n", "d", function()
     if ui_state.target_buf and vim.api.nvim_buf_is_valid(ui_state.target_buf) then
       local termlet = require("termlet")
-      local original_buf = vim.api.nvim_get_current_buf()
-      vim.api.nvim_set_current_buf(ui_state.target_buf)
-      termlet.toggle_filters()
-      vim.api.nvim_set_current_buf(original_buf)
+      termlet.disable_filters_for_buf(ui_state.target_buf)
     end
     M.close()
   end, opts)
@@ -191,10 +182,8 @@ function M.open(target_buf)
 
   ui_state.win = win
 
-  -- Setup UI
-  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  -- Setup UI (render_ui handles modifiable toggle internally)
   render_ui()
-  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
   setup_keybindings()
 

@@ -329,10 +329,9 @@ function M.create_floating_terminal(opts)
     callback = function()
       active_terminals[win] = nil
 
-      -- Clear active filters for this buffer
-      if active_filters[buf] then
-        active_filters[buf] = nil
-      end
+      -- Clear active filters and cached original lines for this buffer
+      active_filters[buf] = nil
+      filter.discard_cache(buf)
 
       -- Handle output persistence
       if term_config.output_persistence == "buffer" and vim.api.nvim_buf_is_valid(buf) then
@@ -1319,10 +1318,16 @@ M.history = history
 ---@return boolean Success
 function M.apply_filter_preset(preset)
   local buf = vim.api.nvim_get_current_buf()
+  return M.apply_filter_preset_to_buf(buf, preset)
+end
 
-  -- Check if this is a terminal buffer
+--- Apply a filter preset to a specific buffer (no buffer switching needed)
+---@param buf number Buffer ID
+---@param preset string Preset name ("errors", "warnings", "info", "all")
+---@return boolean Success
+function M.apply_filter_preset_to_buf(buf, preset)
   if not active_filters[buf] then
-    vim.notify("Not in a TermLet terminal buffer", vim.log.levels.WARN)
+    vim.notify("Not a TermLet terminal buffer", vim.log.levels.WARN)
     return false
   end
 
@@ -1348,6 +1353,18 @@ function M.toggle_filters()
   local status = enabled and "enabled" or "disabled"
   vim.notify("Filters " .. status, vim.log.levels.INFO)
   return enabled
+end
+
+--- Disable filters for a specific buffer (no buffer switching needed)
+---@param buf number Buffer ID
+function M.disable_filters_for_buf(buf)
+  if not active_filters[buf] then
+    return
+  end
+
+  active_filters[buf].enabled = false
+  filter.clear_buffer(buf)
+  vim.notify("Filters disabled", vim.log.levels.INFO)
 end
 
 --- Clear filters from the current terminal buffer
