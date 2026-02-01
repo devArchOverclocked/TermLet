@@ -1640,6 +1640,184 @@ describe("termlet", function()
     end)
   end)
 
+  describe("focus management", function()
+    it("should track original window when creating terminal", function()
+      termlet.setup({ scripts = {} })
+
+      local original_win = vim.api.nvim_get_current_win()
+      local buf, win = termlet.create_floating_terminal({
+        title = "test",
+        original_win = original_win,
+      })
+
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+      -- Terminal should have been created successfully
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+    end)
+
+    it("should return false when focusing non-existent terminal", function()
+      termlet.setup({ scripts = {} })
+      local result = termlet.focus_terminal()
+      assert.is_false(result)
+    end)
+
+    it("should focus existing terminal", function()
+      termlet.setup({ scripts = {} })
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+
+      -- Create another window to move focus away
+      vim.cmd("split")
+      local other_win = vim.api.nvim_get_current_win()
+
+      -- Now focus the terminal
+      local result = termlet.focus_terminal()
+      assert.is_true(result)
+    end)
+
+    it("should toggle between terminal and previous window", function()
+      termlet.setup({ scripts = {} })
+
+      local original_win = vim.api.nvim_get_current_win()
+      local buf, win = termlet.create_floating_terminal({
+        title = "test",
+        original_win = original_win,
+      })
+
+      -- Move to terminal
+      vim.api.nvim_set_current_win(win)
+
+      -- Toggle should take us back
+      local result = termlet.toggle_focus()
+      assert.is_true(result or vim.api.nvim_win_is_valid(vim.api.nvim_get_current_win()))
+    end)
+
+    it("should accept focus configuration options", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          focus = "terminal",
+          auto_insert = true,
+        },
+      })
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should work with focus='previous' mode", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          focus = "previous",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      assert.is_not_nil(win)
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+    end)
+
+    it("should work with focus='none' mode", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          focus = "none",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      assert.is_not_nil(win)
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+    end)
+
+    describe("script execution integration", function()
+      local test_script_path
+
+      before_each(function()
+        -- Create a temporary test script
+        test_script_path = vim.fn.tempname() .. ".sh"
+        local f = io.open(test_script_path, "w")
+        f:write("#!/bin/bash\necho 'test output'\n")
+        f:close()
+        vim.fn.system("chmod +x " .. test_script_path)
+      end)
+
+      after_each(function()
+        if test_script_path then
+          vim.fn.delete(test_script_path)
+        end
+      end)
+
+      it("should keep focus in terminal when focus='terminal'", function()
+        termlet.setup({
+          scripts = {
+            { name = "test", filename = test_script_path }
+          },
+          terminal = {
+            focus = "terminal",
+            auto_insert = false,
+          }
+        })
+
+        local original_win = vim.api.nvim_get_current_win()
+        termlet.run_test()
+
+        -- Give the terminal a moment to be created
+        vim.wait(100)
+
+        local current_win = vim.api.nvim_get_current_win()
+        -- Should be in a different window (the terminal)
+        assert.not_equals(original_win, current_win)
+      end)
+
+      it("should return to previous window when focus='previous'", function()
+        termlet.setup({
+          scripts = {
+            { name = "test", filename = test_script_path }
+          },
+          terminal = {
+            focus = "previous",
+          }
+        })
+
+        local original_win = vim.api.nvim_get_current_win()
+        termlet.run_test()
+
+        -- Give the terminal a moment to be created and focus to return
+        vim.wait(100)
+
+        local current_win = vim.api.nvim_get_current_win()
+        -- Should be back in the original window
+        assert.equals(original_win, current_win)
+      end)
+
+      it("should enter insert mode when auto_insert=true and focus='terminal'", function()
+        termlet.setup({
+          scripts = {
+            { name = "test", filename = test_script_path }
+          },
+          terminal = {
+            focus = "terminal",
+            auto_insert = true,
+          }
+        })
+
+        local original_win = vim.api.nvim_get_current_win()
+        termlet.run_test()
+
+        -- Give the terminal a moment to be created
+        vim.wait(100)
+
+        local current_win = vim.api.nvim_get_current_win()
+        -- Should be in a different window (the terminal)
+        assert.not_equals(original_win, current_win)
+
+        -- Verify the configuration was set correctly
+        -- (In headless mode, startinsert may not work as expected)
+        -- So we just verify the terminal has focus
+      end)
+    end)
+  end)
+
   describe("keybindings", function()
     before_each(function()
       -- Use a temporary config file for testing

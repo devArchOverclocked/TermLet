@@ -37,6 +37,8 @@ local config = {
     },
     output_persistence = "none", -- "none" | "buffer"
     max_saved_buffers = 5,       -- Maximum number of hidden buffers to keep
+    focus = "previous",          -- "terminal" | "previous" | "none" - where to place focus after opening terminal
+    auto_insert = false,         -- Auto-enter insert mode when focus="terminal"
   },
   search = {
     exclude_dirs = {
@@ -295,6 +297,7 @@ function M.create_floating_terminal(opts)
     buf = buf,
     name = name,
     term_config = term_config,
+    original_win = opts.original_win, -- Track original window if provided
   }
 
 
@@ -505,6 +508,9 @@ end
 
 -- Improved script execution with better error handling
 local function execute_script(script)
+  -- Save the current window BEFORE doing anything else
+  local original_win = vim.api.nvim_get_current_win()
+
   local full_path
 
   -- Determine how to find the script
@@ -528,9 +534,10 @@ local function execute_script(script)
   local cwd = vim.fn.fnamemodify(full_path, ":h")
   local script_name = vim.fn.fnamemodify(full_path, ":t")
 
-  -- Create terminal with script name as title
+  -- Create terminal with script name as title, passing original window
   local buf, win = M.create_floating_terminal({
-    title = script.name or script_name
+    title = script.name or script_name,
+    original_win = original_win,
   })
 
   if not buf or not win then
@@ -595,9 +602,33 @@ local function execute_script(script)
     vim.api.nvim_win_close(win, true)
     return false
   end
-  vim.api.nvim_set_current_win(vim.fn.win_getid(vim.fn.winnr('#')))
-  -- Enter insert mode to interact with terminal
-  --vim.cmd("startinsert")
+
+  -- Handle focus based on configuration
+  local focus_mode = config.terminal.focus
+  if focus_mode == "previous" then
+    -- Return focus to the original window
+    if original_win and vim.api.nvim_win_is_valid(original_win) then
+      vim.api.nvim_set_current_win(original_win)
+    else
+      -- Try to find any valid non-floating window
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        local win_config = vim.api.nvim_win_get_config(w)
+        if (not win_config.relative or win_config.relative == "") and vim.api.nvim_win_is_valid(w) and w ~= win then
+          vim.api.nvim_set_current_win(w)
+          break
+        end
+      end
+    end
+  elseif focus_mode == "terminal" then
+    -- Stay in terminal window
+    vim.api.nvim_set_current_win(win)
+    -- Optionally enter insert mode
+    if config.terminal.auto_insert then
+      vim.cmd("startinsert")
+    end
+  end
+  -- focus_mode == "none" means don't change focus (already in terminal)
+
   return true
 end
 
@@ -1065,6 +1096,76 @@ end
 ---@return table Map of script_name -> keybinding
 function M.get_keybindings()
   return keybindings.get_keybindings()
+end
+
+-- ============================================================================
+-- Focus Management API
+-- ============================================================================
+
+--- Focus the most recent terminal window
+---@return boolean Success
+function M.focus_terminal()
+  -- Find the most recently created terminal
+  local wins = vim.tbl_keys(active_terminals)
+  if #wins == 0 then
+    vim.notify("No active terminals", vim.log.levels.INFO)
+    return false
+  end
+
+  local last_win = wins[#wins]
+  if vim.api.nvim_win_is_valid(last_win) then
+    vim.api.nvim_set_current_win(last_win)
+    return true
+  end
+
+  vim.notify("No valid terminal window found", vim.log.levels.WARN)
+  return false
+end
+
+--- Return focus to the window that was active before the terminal opened
+---@return boolean Success
+function M.focus_previous()
+  local current_win = vim.api.nvim_get_current_win()
+
+  -- Check if we're currently in a terminal window
+  if not active_terminals[current_win] then
+    vim.notify("Not in a terminal window", vim.log.levels.INFO)
+    return false
+  end
+
+  local term_data = active_terminals[current_win]
+  local original_win = term_data.original_win
+
+  if not original_win or not vim.api.nvim_win_is_valid(original_win) then
+    -- Try to find any valid non-floating window
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local win_config = vim.api.nvim_win_get_config(win)
+      if (not win_config.relative or win_config.relative == "") and vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_current_win(win)
+        return true
+      end
+    end
+    vim.notify("No previous window available", vim.log.levels.WARN)
+    return false
+  end
+
+  vim.api.nvim_set_current_win(original_win)
+  return true
+end
+
+--- Toggle focus between terminal and previous window
+---@return boolean Success
+function M.toggle_focus()
+  local current_win = vim.api.nvim_get_current_win()
+
+  -- Check if we're in a terminal window
+  if active_terminals[current_win] then
+    -- We're in a terminal, switch to previous window
+    return M.focus_previous()
+  else
+    -- We're not in a terminal, switch to the most recent terminal
+    return M.focus_terminal()
+  end
 end
 
 return M
