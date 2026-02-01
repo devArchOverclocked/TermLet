@@ -576,6 +576,45 @@ describe("termlet.stacktrace", function()
       assert.are.equal(42, result.line_number)
       assert.are.equal(15, result.column_number)
     end)
+
+    it("should parse MSBuild error format with path containing forward slash", function()
+      local line = 'BV/APITest.cs(1887,62): error CS1503: Argument 1: cannot convert from'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("BV/APITest.cs", result.file_path)
+      assert.are.equal(1887, result.line_number)
+      assert.are.equal(62, result.column_number)
+    end)
+
+    it("should parse MSBuild error format with absolute Windows path", function()
+      local line = 'C:\\Projects\\MyApp\\Program.cs(10,5): warning CS0168: The variable'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("C:/Projects/MyApp/Program.cs", result.file_path)
+      assert.are.equal(10, result.line_number)
+      assert.are.equal(5, result.column_number)
+    end)
+
+    it("should parse MSBuild error format without column number", function()
+      local line = 'src/Utils.cs(123): error CS0246: The type or namespace'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("src/Utils.cs", result.file_path)
+      assert.are.equal(123, result.line_number)
+      assert.is_nil(result.column_number)
+    end)
+
+    it("should parse .NET exception with deeply nested path", function()
+      local line = "   at MyNamespace.MyClass.MyMethod() in /home/dev/project/src/core/MyClass.cs:line 42"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("/home/dev/project/src/core/MyClass.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
   end)
 
   describe("JavaScript parser", function()
