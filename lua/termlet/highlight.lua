@@ -32,15 +32,39 @@ local function init()
     default_hl.fg = "#0066cc" -- Darker blue for light themes
   end
 
-  -- Set the default highlight group if it doesn't exist
+  -- Set the default highlight group
   vim.api.nvim_set_hl(0, config.hl_group, default_hl)
+
+  -- Pre-create style-specific highlight groups so they don't need to be
+  -- created on every highlight_file_path call
+  vim.api.nvim_set_hl(0, config.hl_group .. "Underline", { underline = true })
+
+  local both_opts = { underline = true }
+  if bg == "dark" then
+    both_opts.fg = "#61afef"
+  else
+    both_opts.fg = "#0066cc"
+  end
+  vim.api.nvim_set_hl(0, config.hl_group .. "Both", both_opts)
 end
+
+-- Valid style values
+local valid_styles = { underline = true, color = true, both = true, none = true }
 
 -- Setup function to configure the highlight module
 -- @param user_config table User configuration
 function M.setup(user_config)
   if user_config then
     config = vim.tbl_deep_extend("force", config, user_config)
+  end
+
+  -- Validate style config value
+  if not valid_styles[config.style] then
+    vim.notify(
+      "[TermLet] Invalid highlight style '" .. tostring(config.style)
+        .. "', falling back to 'underline'. Valid values: underline, color, both, none",
+      vim.log.levels.WARN)
+    config.style = "underline"
   end
 
   init()
@@ -64,25 +88,13 @@ function M.highlight_file_path(bufnr, line_num, start_col, end_col)
     init()
   end
 
-  -- Create a dynamic highlight group based on the current style
-  -- This allows us to change styling without modifying the base highlight group
+  -- Look up the pre-created highlight group for the current style
+  -- Groups are created once during init() to avoid redundant nvim_set_hl calls
   local hl_name = config.hl_group
   if config.style == "underline" then
     hl_name = config.hl_group .. "Underline"
-    vim.api.nvim_set_hl(0, hl_name, { underline = true })
-  elseif config.style == "color" then
-    hl_name = config.hl_group
-    -- Use the base highlight group which has color
   elseif config.style == "both" then
     hl_name = config.hl_group .. "Both"
-    local bg = vim.o.background
-    local hl_opts = { underline = true }
-    if bg == "dark" then
-      hl_opts.fg = "#61afef"
-    else
-      hl_opts.fg = "#0066cc"
-    end
-    vim.api.nvim_set_hl(0, hl_name, hl_opts)
   end
 
   -- Build extmark options

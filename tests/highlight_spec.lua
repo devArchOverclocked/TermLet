@@ -54,6 +54,18 @@ describe("termlet.highlight", function()
       local config = highlight.get_config()
       assert.equals("none", config.style)
     end)
+
+    it("should reject invalid style and fall back to 'underline'", function()
+      highlight.setup({ style = "bold" })
+      local config = highlight.get_config()
+      assert.equals("underline", config.style)
+    end)
+
+    it("should reject non-string invalid style and fall back to 'underline'", function()
+      highlight.setup({ style = 123 })
+      local config = highlight.get_config()
+      assert.equals("underline", config.style)
+    end)
   end)
 
   describe("enable/disable", function()

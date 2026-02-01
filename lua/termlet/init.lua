@@ -572,6 +572,7 @@ local function execute_script(script)
         -- and line numbers are accurate 1-indexed values matching cursor positions.
         if config.stacktrace.enabled and buf and vim.api.nvim_buf_is_valid(buf) then
           stacktrace.clear_metadata(buf)
+          highlight.clear_buffer(buf)
           stacktrace.scan_buffer_for_stacktraces(buf, cwd)
         end
       end)
@@ -666,7 +667,6 @@ function M.setup(user_config)
   if config.stacktrace and config.stacktrace.highlight then
     highlight.setup(config.stacktrace.highlight)
   end
-
 
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
