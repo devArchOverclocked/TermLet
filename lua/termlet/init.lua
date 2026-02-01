@@ -37,7 +37,7 @@ local config = {
     },
     output_persistence = "none", -- "none" | "buffer"
     max_saved_buffers = 5,       -- Maximum number of hidden buffers to keep
-    focus = "previous",          -- "terminal" | "previous" | "none"
+    focus = "previous",          -- "terminal" | "previous" | "none" - where to place focus after opening terminal
     auto_insert = false,         -- Auto-enter insert mode when focus="terminal"
   },
   search = {
@@ -609,6 +609,15 @@ local function execute_script(script)
     -- Return focus to the original window
     if original_win and vim.api.nvim_win_is_valid(original_win) then
       vim.api.nvim_set_current_win(original_win)
+    else
+      -- Try to find any valid non-floating window
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        local win_config = vim.api.nvim_win_get_config(w)
+        if (not win_config.relative or win_config.relative == "") and vim.api.nvim_win_is_valid(w) and w ~= win then
+          vim.api.nvim_set_current_win(w)
+          break
+        end
+      end
     end
   elseif focus_mode == "terminal" then
     -- Stay in terminal window

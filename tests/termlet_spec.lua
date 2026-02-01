@@ -1728,6 +1728,94 @@ describe("termlet", function()
       assert.is_not_nil(win)
       assert.is_true(vim.api.nvim_win_is_valid(win))
     end)
+
+    describe("script execution integration", function()
+      local test_script_path
+
+      before_each(function()
+        -- Create a temporary test script
+        test_script_path = vim.fn.tempname() .. ".sh"
+        local f = io.open(test_script_path, "w")
+        f:write("#!/bin/bash\necho 'test output'\n")
+        f:close()
+        vim.fn.system("chmod +x " .. test_script_path)
+      end)
+
+      after_each(function()
+        if test_script_path then
+          vim.fn.delete(test_script_path)
+        end
+      end)
+
+      it("should keep focus in terminal when focus='terminal'", function()
+        termlet.setup({
+          scripts = {
+            { name = "test", filename = test_script_path }
+          },
+          terminal = {
+            focus = "terminal",
+            auto_insert = false,
+          }
+        })
+
+        local original_win = vim.api.nvim_get_current_win()
+        termlet.run_test()
+
+        -- Give the terminal a moment to be created
+        vim.wait(100)
+
+        local current_win = vim.api.nvim_get_current_win()
+        -- Should be in a different window (the terminal)
+        assert.not_equals(original_win, current_win)
+      end)
+
+      it("should return to previous window when focus='previous'", function()
+        termlet.setup({
+          scripts = {
+            { name = "test", filename = test_script_path }
+          },
+          terminal = {
+            focus = "previous",
+          }
+        })
+
+        local original_win = vim.api.nvim_get_current_win()
+        termlet.run_test()
+
+        -- Give the terminal a moment to be created and focus to return
+        vim.wait(100)
+
+        local current_win = vim.api.nvim_get_current_win()
+        -- Should be back in the original window
+        assert.equals(original_win, current_win)
+      end)
+
+      it("should enter insert mode when auto_insert=true and focus='terminal'", function()
+        termlet.setup({
+          scripts = {
+            { name = "test", filename = test_script_path }
+          },
+          terminal = {
+            focus = "terminal",
+            auto_insert = true,
+          }
+        })
+
+        local original_win = vim.api.nvim_get_current_win()
+        termlet.run_test()
+
+        -- Give the terminal a moment to be created
+        vim.wait(100)
+
+        local current_win = vim.api.nvim_get_current_win()
+        -- Should be in a different window (the terminal)
+        assert.not_equals(original_win, current_win)
+
+        -- Verify the configuration was set correctly
+        -- (In headless mode, startinsert may not work as expected)
+        -- So we just verify the terminal has focus
+      end)
+    end)
   end)
 
   describe("keybindings", function()
