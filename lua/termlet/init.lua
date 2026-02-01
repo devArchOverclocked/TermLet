@@ -112,6 +112,9 @@ local saved_buffers = {}
 -- Store active filters per buffer
 local active_filters = {}
 
+-- Store original script-level filter config per buffer (preserved across preset changes)
+local original_script_filters = {}
+
 -- Literal string replacement to avoid Lua pattern issues with special chars
 -- Replaces ALL occurrences of placeholder in str
 local function replace_placeholder(str, placeholder, replacement)
@@ -329,8 +332,9 @@ function M.create_floating_terminal(opts)
     callback = function()
       active_terminals[win] = nil
 
-      -- Clear active filters and cached original lines for this buffer
+      -- Clear active filters, original script config, and cached original lines for this buffer
       active_filters[buf] = nil
+      original_script_filters[buf] = nil
       filter.discard_cache(buf)
 
       -- Handle output persistence
@@ -585,6 +589,7 @@ local function execute_script(script)
   -- Store filters for this buffer
   local script_filters = vim.tbl_deep_extend("force", config.terminal.filters or {}, script.filters or {})
   active_filters[buf] = script_filters
+  original_script_filters[buf] = vim.deepcopy(script_filters)
 
   -- Determine command based on file extension or explicit command
   local cmd = script.cmd or ("./" .. script_name)
@@ -762,6 +767,9 @@ function M.setup(user_config)
   if config.history and config.history.max_entries then
     history.set_max_entries(config.history.max_entries)
   end
+
+  -- Initialize filter module with configuration
+  filter.setup(config.terminal.filters)
 
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
@@ -1356,12 +1364,17 @@ function M.toggle_filters()
 end
 
 --- Disable filters for a specific buffer (no buffer switching needed)
+--- Restores the original script-level filter config with enabled=false.
 ---@param buf number Buffer ID
 function M.disable_filters_for_buf(buf)
   if not active_filters[buf] then
     return
   end
 
+  -- Restore original script config if available, with enabled=false
+  if original_script_filters[buf] then
+    active_filters[buf] = vim.deepcopy(original_script_filters[buf])
+  end
   active_filters[buf].enabled = false
   filter.clear_buffer(buf)
   vim.notify("Filters disabled", vim.log.levels.INFO)

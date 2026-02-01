@@ -452,10 +452,10 @@ require("termlet").setup({
 
 ### Interactive Filter Mode
 
-Press `/` in a terminal window to enter interactive filter mode:
+Press `<C-f>` in a terminal window to enter interactive filter mode:
 
 ```lua
-vim.keymap.set("t", "/", function()
+vim.keymap.set("t", "<C-f>", function()
   require("termlet").open_filter_ui()
 end, { desc = "Open filter UI" })
 ```
@@ -489,12 +489,12 @@ require("termlet").open_filter_ui()
 
 ```lua
 -- Open filter UI in terminal mode
-vim.keymap.set("t", "/", function()
+vim.keymap.set("t", "<C-f>", function()
   require("termlet").open_filter_ui()
 end, { desc = "Open filter UI" })
 
 -- Toggle filters in terminal mode
-vim.keymap.set("t", "<C-f>", function()
+vim.keymap.set("t", "<C-g>", function()
   require("termlet").toggle_filters()
 end, { desc = "Toggle filters" })
 
@@ -754,7 +754,7 @@ tests/
 ├── menu_spec.lua             # Interactive menu tests
 ├── keybindings_spec.lua      # Keybinding management tests
 ├── highlight_spec.lua        # Visual highlighting tests
-└── navigation_spec.lua       # Navigation tests
+└── filter_spec.lua           # Output filtering tests
 ```
 
 ### Requirements

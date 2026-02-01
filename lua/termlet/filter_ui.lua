@@ -131,7 +131,7 @@ end
 function M.open(target_buf)
   if M.is_open() then
     M.close()
-    return
+    return false
   end
 
   -- Validate target buffer

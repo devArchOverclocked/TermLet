@@ -44,6 +44,39 @@ describe("termlet.filter", function()
     end)
   end)
 
+  describe("setup config propagation", function()
+    it("should propagate user config to get_config()", function()
+      filter.setup({
+        enabled = true,
+        show_only = { "error", "warning" },
+        hide = { "debug" },
+        highlight = {
+          { pattern = "error", color = "#ff0000" },
+        },
+      })
+      local cfg = filter.get_config()
+      assert.is_true(cfg.enabled)
+      assert.are.equal(2, #cfg.show_only)
+      assert.are.equal(1, #cfg.hide)
+      assert.are.equal(1, #cfg.highlight)
+    end)
+
+    it("should merge partial config with defaults", function()
+      filter.setup({ enabled = true })
+      local cfg = filter.get_config()
+      assert.is_true(cfg.enabled)
+      assert.are.equal(0, #cfg.show_only)
+      assert.are.equal(0, #cfg.hide)
+      assert.are.equal(0, #cfg.highlight)
+    end)
+
+    it("should handle nil config without error", function()
+      filter.setup(nil)
+      local cfg = filter.get_config()
+      assert.is_false(cfg.enabled)
+    end)
+  end)
+
   describe("process_line", function()
     it("should show all lines when filters are disabled", function()
       filter.setup({ enabled = false })
@@ -551,6 +584,32 @@ describe("termlet.filter", function()
       assert.is_true(filter.has_original_lines(buf))
 
       vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+  end)
+
+  describe("discard_cache", function()
+    it("should discard cached original lines for a buffer", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "error: test", "info: test" })
+
+      local filters = {
+        enabled = true,
+        show_only = { "error" },
+        hide = {},
+        highlight = {},
+      }
+
+      filter.apply_filters(buf, filters)
+      assert.is_true(filter.has_original_lines(buf))
+
+      filter.discard_cache(buf)
+      assert.is_false(filter.has_original_lines(buf))
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should not error when discarding non-existent cache", function()
+      filter.discard_cache(9999)
     end)
   end)
 
