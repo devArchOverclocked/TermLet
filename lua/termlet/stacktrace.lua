@@ -23,6 +23,9 @@ local buffer_metadata = {}
 -- Output buffer for multi-line detection
 local output_buffer = {}
 
+-- Load highlight module once at module level with pcall guard
+local highlight_ok, highlight_module = pcall(require, "termlet.highlight")
+
 ---Register a new stack trace pattern for a language
 ---@param language string The language identifier (e.g., 'python', 'csharp')
 ---@param pattern_config table Pattern configuration
@@ -336,6 +339,21 @@ function M.process_terminal_output(data, cwd, buffer_id)
         -- Store in buffer metadata keyed on actual terminal buffer line number
         if buffer_id then
           M.store_metadata(buffer_id, buffer_line, file_info)
+
+          -- Apply highlighting if available
+          -- We need to use vim.schedule because we're in a callback and need to
+          -- wait for the line to be fully rendered in the terminal buffer
+          if highlight_ok and highlight_module.is_enabled() then
+            vim.schedule(function()
+              if vim.api.nvim_buf_is_valid(buffer_id) then
+                -- Get the actual line text from the buffer
+                local lines = vim.api.nvim_buf_get_lines(buffer_id, buffer_line - 1, buffer_line, false)
+                if #lines > 0 then
+                  highlight_module.highlight_stacktrace_line(buffer_id, buffer_line, lines[1], file_info)
+                end
+              end
+            end)
+          end
         end
       end
     end
@@ -441,6 +459,11 @@ function M.scan_buffer_for_stacktraces(buffer_id, cwd)
         file_info.buffer_line = i
         table.insert(results, file_info)
         M.store_metadata(buffer_id, i, file_info)
+
+        -- Apply highlighting if available
+        if highlight_ok and highlight_module.is_enabled() then
+          highlight_module.highlight_stacktrace_line(buffer_id, i, line, file_info)
+        end
       end
     end
   end
