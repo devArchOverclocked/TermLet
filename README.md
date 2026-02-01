@@ -532,6 +532,78 @@ See the [Parser Development Guide](docs/PARSER_DEVELOPMENT.md) for:
 
 ---
 
+## 🧪 Testing
+
+TermLet includes a comprehensive test suite using [plenary.nvim](https://github.com/nvim-lua/plenary.nvim).
+
+### Running Tests
+
+#### Using Make (Recommended)
+
+```bash
+# Run all tests
+make test
+
+# Run a specific test file
+make test-file FILE=tests/termlet_spec.lua
+
+# Clean test artifacts
+make clean
+```
+
+#### Using Neovim Directly
+
+```bash
+# Run all tests
+nvim --headless -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
+
+# Run a specific test file
+nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedFile tests/termlet_spec.lua"
+```
+
+### Test Coverage
+
+The test suite covers:
+- ✅ Path discovery functions (`find_script_by_name`, `find_script`)
+- ✅ Floating terminal creation and configuration
+- ✅ Terminal management (close, close_all)
+- ✅ Configuration validation and setup
+- ✅ Function name sanitization
+- ✅ Stack trace detection and parsing (Python, C#, JavaScript, Java, etc.)
+- ✅ Interactive script menu
+- ✅ Keybinding management
+- ✅ Visual highlighting of file paths
+- ✅ Navigation features
+- ✅ Output persistence
+- ✅ Focus management
+
+### Test Structure
+
+```
+tests/
+├── minimal_init.lua          # Minimal Neovim config for tests
+├── termlet_spec.lua          # Main module tests
+├── stacktrace_spec.lua       # Stack trace detection tests
+├── menu_spec.lua             # Interactive menu tests
+├── keybindings_spec.lua      # Keybinding management tests
+├── highlight_spec.lua        # Visual highlighting tests
+└── navigation_spec.lua       # Navigation tests
+```
+
+### Requirements
+
+- [Neovim](https://neovim.io/) (stable or nightly)
+- [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) (installed automatically in CI)
+
+### Continuous Integration
+
+Tests run automatically on GitHub Actions for:
+- Every push to `main`, `master`, or `develop` branches
+- All pull requests
+- Both Neovim stable and nightly versions
+
+---
+
 ## ✅ Example using [Packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
