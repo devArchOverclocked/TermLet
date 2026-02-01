@@ -12,6 +12,9 @@ local highlight = require("termlet.highlight")
 -- Load keybindings module
 local keybindings = require("termlet.keybindings")
 
+-- Load history module
+local history = require("termlet.history")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -80,6 +83,10 @@ local config = {
       style = "underline",    -- "underline", "color", "both", "none"
       hl_group = "TermLetStackTracePath", -- Custom highlight group
     },
+  },
+  history = {
+    enabled = true,           -- Enable execution history tracking
+    max_entries = 50,         -- Maximum number of history entries to keep
   },
   debug = false,
 }
@@ -561,6 +568,9 @@ local function execute_script(script)
 
   debug_log("Executing: " .. cmd .. " in " .. cwd)
 
+  -- Track start time for history
+  local start_time = vim.loop.hrtime()
+
   -- Run the command in the terminal.
   -- Note: termopen() creates a pseudo-terminal (PTY), which merges stdout and
   -- stderr into a single stream. on_stderr is never called with termopen().
@@ -581,6 +591,19 @@ local function execute_script(script)
           stacktrace.clear_metadata(buf)
           highlight.clear_buffer(buf)
           stacktrace.scan_buffer_for_stacktraces(buf, cwd)
+        end
+        -- Record execution in history
+        if config.history.enabled then
+          local end_time = vim.loop.hrtime()
+          local execution_time = (end_time - start_time) / 1e9 -- Convert to seconds
+          history.add_entry({
+            script_name = script.name,
+            exit_code = code,
+            execution_time = execution_time,
+            timestamp = os.time(),
+            working_dir = cwd,
+            script = script, -- Store script config for re-running
+          })
         end
       end)
     end,
@@ -697,6 +720,11 @@ function M.setup(user_config)
   -- Initialize highlight module with configuration
   if config.stacktrace and config.stacktrace.highlight then
     highlight.setup(config.stacktrace.highlight)
+  end
+
+  -- Initialize history module with configuration
+  if config.history and config.history.max_entries then
+    history.set_max_entries(config.history.max_entries)
   end
 
   -- Validate scripts configuration
@@ -1167,5 +1195,79 @@ function M.toggle_focus()
     return M.focus_terminal()
   end
 end
+
+-- ============================================================================
+-- History Management API
+-- ============================================================================
+
+--- Re-run the most recently executed script
+---@return boolean Success
+function M.rerun_last()
+  local last_entry = history.get_last_entry()
+  if not last_entry then
+    vim.notify("No history available", vim.log.levels.INFO)
+    return false
+  end
+
+  if not last_entry.script then
+    vim.notify("Script configuration not found in history", vim.log.levels.ERROR)
+    return false
+  end
+
+  vim.notify("Re-running: " .. last_entry.script_name, vim.log.levels.INFO)
+  return execute_script(last_entry.script)
+end
+
+--- Show the interactive history browser
+---@return boolean Success
+function M.show_history()
+  if not config.history.enabled then
+    vim.notify("History tracking is disabled", vim.log.levels.INFO)
+    return false
+  end
+
+  return history.open(function(entry)
+    if entry.script then
+      execute_script(entry.script)
+    else
+      vim.notify("Script configuration not found in history", vim.log.levels.ERROR)
+    end
+  end, config.history)
+end
+
+--- Close the history browser
+function M.close_history()
+  history.close()
+end
+
+--- Check if history browser is currently open
+---@return boolean
+function M.is_history_open()
+  return history.is_open()
+end
+
+--- Toggle the history browser open/closed
+function M.toggle_history()
+  if history.is_open() then
+    history.close()
+  else
+    M.show_history()
+  end
+end
+
+--- Get all history entries
+---@return table List of history entries
+function M.get_history()
+  return history.get_entries()
+end
+
+--- Clear all history entries
+function M.clear_history()
+  history.clear_history()
+  vim.notify("History cleared", vim.log.levels.INFO)
+end
+
+--- Expose history module for advanced usage
+M.history = history
 
 return M
