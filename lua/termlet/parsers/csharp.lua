@@ -24,7 +24,8 @@ local M = {
       -- MSBuild error format
       -- Example: "File.cs(42,15): error CS1234: Error message"
       -- Example: "C:\path\File.cs(42,15): error CS1234"
-      pattern = "([%w_:/\\%.%-]+%.cs)%((%d+),?(%d*)%)",
+      -- Example: "My Project/File.cs(10,5): error CS1234"
+      pattern = "([%w_:/\\ %.%-]+%.cs)%((%d+),?(%d*)%)",
       path_group = 1,
       line_group = 2,
       column_group = 3,

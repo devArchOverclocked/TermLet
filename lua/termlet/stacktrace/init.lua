@@ -313,8 +313,14 @@ function M.setup(user_config)
     languages_to_load = {}
     local parser_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h") .. "/parsers"
     if vim.fn.isdirectory(parser_dir) == 1 then
-      local handle = vim.loop.fs_scandir(parser_dir)
-      if handle then
+      local handle, err = vim.loop.fs_scandir(parser_dir)
+      if not handle then
+        -- Directory doesn't exist or isn't readable - skip auto-discovery
+        vim.notify(
+          "[TermLet] Parser auto-discovery skipped: " .. (err or "unknown error"),
+          vim.log.levels.DEBUG
+        )
+      else
         while true do
           local name, type = vim.loop.fs_scandir_next(handle)
           if not name then break end

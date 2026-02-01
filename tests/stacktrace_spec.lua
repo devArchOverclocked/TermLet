@@ -615,6 +615,30 @@ describe("termlet.stacktrace", function()
       assert.are.equal("/home/dev/project/src/core/MyClass.cs", result.file_path)
       assert.are.equal(42, result.line_number)
     end)
+
+    it("should parse MSBuild error with path containing spaces", function()
+      local line = 'My Project/My File.cs(10,5): error CS1234: The type or namespace'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("My Project/My File.cs", result.file_path)
+      assert.are.equal(10, result.line_number)
+      assert.are.equal(5, result.column_number)
+    end)
+
+    it("should parse MSBuild error with Windows path using backslashes", function()
+      -- Test that the pattern correctly matches Windows backslash paths
+      -- In real terminal output, this would be: C:\Users\Dev\Project\File.cs(42,15): error
+      -- In Lua string literals, we need to escape backslashes, so \\ represents one backslash
+      local line = 'C:\\Users\\Dev\\Project\\File.cs(42,15): error CS1234: Error message'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      -- The resolve_path function normalizes backslashes to forward slashes
+      assert.are.equal("C:/Users/Dev/Project/File.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.are.equal(15, result.column_number)
+    end)
   end)
 
   describe("JavaScript parser", function()
