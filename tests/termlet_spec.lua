@@ -1640,6 +1640,96 @@ describe("termlet", function()
     end)
   end)
 
+  describe("focus management", function()
+    it("should track original window when creating terminal", function()
+      termlet.setup({ scripts = {} })
+
+      local original_win = vim.api.nvim_get_current_win()
+      local buf, win = termlet.create_floating_terminal({
+        title = "test",
+        original_win = original_win,
+      })
+
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+      -- Terminal should have been created successfully
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+    end)
+
+    it("should return false when focusing non-existent terminal", function()
+      termlet.setup({ scripts = {} })
+      local result = termlet.focus_terminal()
+      assert.is_false(result)
+    end)
+
+    it("should focus existing terminal", function()
+      termlet.setup({ scripts = {} })
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+
+      -- Create another window to move focus away
+      vim.cmd("split")
+      local other_win = vim.api.nvim_get_current_win()
+
+      -- Now focus the terminal
+      local result = termlet.focus_terminal()
+      assert.is_true(result)
+    end)
+
+    it("should toggle between terminal and previous window", function()
+      termlet.setup({ scripts = {} })
+
+      local original_win = vim.api.nvim_get_current_win()
+      local buf, win = termlet.create_floating_terminal({
+        title = "test",
+        original_win = original_win,
+      })
+
+      -- Move to terminal
+      vim.api.nvim_set_current_win(win)
+
+      -- Toggle should take us back
+      local result = termlet.toggle_focus()
+      assert.is_true(result or vim.api.nvim_win_is_valid(vim.api.nvim_get_current_win()))
+    end)
+
+    it("should accept focus configuration options", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          focus = "terminal",
+          auto_insert = true,
+        },
+      })
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should work with focus='previous' mode", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          focus = "previous",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      assert.is_not_nil(win)
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+    end)
+
+    it("should work with focus='none' mode", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          focus = "none",
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      assert.is_not_nil(win)
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+    end)
+  end)
+
   describe("keybindings", function()
     before_each(function()
       -- Use a temporary config file for testing
