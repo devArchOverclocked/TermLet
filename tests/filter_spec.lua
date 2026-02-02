@@ -613,6 +613,113 @@ describe("termlet.filter", function()
     end)
   end)
 
+  describe("non-modifiable buffer", function()
+    it("should apply filters on a non-modifiable buffer without error", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+        "error: something went wrong",
+        "info: all good",
+        "warning: be careful",
+        "debug: verbose output",
+      })
+      -- Simulate terminal buffer by making it non-modifiable
+      vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+
+      local filters = {
+        enabled = true,
+        show_only = { "error", "warning" },
+        hide = {},
+        highlight = {
+          { pattern = "error", color = "#ff0000" },
+          { pattern = "warning", color = "#ffaa00" },
+        },
+      }
+
+      local count = filter.apply_filters(buf, filters)
+      assert.are.equal(2, count)
+
+      -- Buffer should contain only matching lines
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(2, #lines)
+      assert.is_truthy(lines[1]:find("error"))
+      assert.is_truthy(lines[2]:find("warning"))
+
+      -- Buffer should remain non-modifiable after filtering
+      local modifiable = vim.api.nvim_get_option_value("modifiable", { buf = buf })
+      assert.is_false(modifiable)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should restore buffer on a non-modifiable buffer without error", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local original = {
+        "error: something",
+        "info: ignored",
+        "debug: verbose",
+      }
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, original)
+      vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+
+      local filters = {
+        enabled = true,
+        show_only = { "error" },
+        hide = {},
+        highlight = {},
+      }
+
+      filter.apply_filters(buf, filters)
+      local filtered = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(1, #filtered)
+
+      -- Restore on non-modifiable buffer
+      local restored = filter.restore_buffer(buf)
+      assert.is_true(restored)
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(3, #lines)
+      assert.are.equal("error: something", lines[1])
+      assert.are.equal("info: ignored", lines[2])
+      assert.are.equal("debug: verbose", lines[3])
+
+      -- Buffer should remain non-modifiable
+      local modifiable = vim.api.nvim_get_option_value("modifiable", { buf = buf })
+      assert.is_false(modifiable)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should toggle filters on a non-modifiable buffer without error", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+        "error: test",
+        "info: test",
+      })
+      vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+
+      local filters = {
+        enabled = true,
+        show_only = { "error" },
+        hide = {},
+        highlight = {},
+      }
+
+      -- Apply
+      filter.apply_filters(buf, filters)
+      assert.are.equal(1, #vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+
+      -- Toggle off (restores original)
+      filter.toggle_enabled(buf, filters)
+      assert.are.equal(2, #vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+
+      -- Buffer should remain non-modifiable
+      local modifiable = vim.api.nvim_get_option_value("modifiable", { buf = buf })
+      assert.is_false(modifiable)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+  end)
+
   describe("restore_buffer", function()
     it("should return false when no cache exists", function()
       local buf = vim.api.nvim_create_buf(false, true)

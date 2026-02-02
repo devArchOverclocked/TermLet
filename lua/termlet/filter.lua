@@ -176,7 +176,14 @@ function M.apply_filters(bufnr, filters)
 
   -- Update buffer content with filtered lines
   if hidden_count > 0 then
+    local was_modifiable = vim.api.nvim_get_option_value("modifiable", { buf = bufnr })
+    if not was_modifiable then
+      vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
+    end
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+    if not was_modifiable then
+      vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
+    end
   end
 
   -- Apply highlights to the visible lines
@@ -203,7 +210,14 @@ function M.restore_buffer(bufnr)
     return false
   end
 
+  local was_modifiable = vim.api.nvim_get_option_value("modifiable", { buf = bufnr })
+  if not was_modifiable then
+    vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
+  end
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, cached)
+  if not was_modifiable then
+    vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
+  end
   original_lines_cache[bufnr] = nil
   return true
 end
