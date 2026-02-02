@@ -2,15 +2,16 @@ name: Tests
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
 
 jobs:
   test:
-    name: Run Tests
+    name: "Tests (Neovim ${{ matrix.neovim_version }})"
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         neovim_version: ['stable', 'nightly']
 
@@ -23,6 +24,9 @@ jobs:
         with:
           neovim: true
           version: ${{ matrix.neovim_version }}
+
+      - name: Print Neovim version
+        run: nvim --version
 
       - name: Install plenary.nvim
         run: |

@@ -1,0 +1,44 @@
+# Neovim swap and backup files
+*.swp
+*.swo
+*~
+*.bak
+
+# Neovim undo files
+*.un~
+
+# Neovim session files
+Session.vim
+
+# Tags
+tags
+tags.lock
+tags.temp
+
+# macOS
+.DS_Store
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# IDE / Editor directories
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Luarocks
+lua_modules/
+luarocks/
+
+# Test artifacts
+tests/*.swp
+tests/*~
+
+# Coverage reports
+luacov.stats.out
+luacov.report.out

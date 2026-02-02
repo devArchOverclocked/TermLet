@@ -70,7 +70,7 @@ end
 ---@param is_selected boolean Whether this script is selected
 ---@param width number Available width for the line
 ---@return string Formatted line
-local function format_script_line(script, index, is_selected, width)
+local function format_script_line(script, _index, is_selected, width)
   local prefix = is_selected and "  > " or "    "
   local name = script.name or "unnamed"
   local description = script.description or ""
@@ -394,20 +394,25 @@ local function setup_keymaps()
       vim.keymap.set("n", char, function()
         if state.search_mode then
           handle_search_input(char)
-        elseif char == "g" then
-          -- Wait for second 'g' for gg command
-          -- This is handled by the default gg mapping
         end
+        -- For char == "g": wait for second 'g' for gg command
+        -- This is handled by the default gg mapping
       end, opts)
     else
       -- For mapped keys, check search mode first
       local original_fn
-      if char == "j" then original_fn = move_down
-      elseif char == "k" then original_fn = move_up
-      elseif char == "q" then original_fn = M.close
-      elseif char == "/" then original_fn = enter_search_mode
-      elseif char == "?" then original_fn = toggle_help
-      elseif char == "G" then original_fn = go_to_last
+      if char == "j" then
+        original_fn = move_down
+      elseif char == "k" then
+        original_fn = move_up
+      elseif char == "q" then
+        original_fn = M.close
+      elseif char == "/" then
+        original_fn = enter_search_mode
+      elseif char == "?" then
+        original_fn = toggle_help
+      elseif char == "G" then
+        original_fn = go_to_last
       end
 
       vim.keymap.set("n", char, function()

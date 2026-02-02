@@ -107,7 +107,7 @@ describe("termlet.highlight", function()
       -- Create a test buffer
       bufnr = vim.api.nvim_create_buf(false, true)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-        "File \"/path/to/file.py\", line 42, in function",
+        'File "/path/to/file.py", line 42, in function',
         "Some other line",
       })
       highlight.setup({ enabled = true, style = "underline" })

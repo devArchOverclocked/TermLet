@@ -387,12 +387,12 @@ describe("termlet.keybindings", function()
 
   describe("on_save callback", function()
     it("should call callback when keybinding is set", function()
-      local callback_called = false
-      local callback_keybindings = nil
+      local _callback_called = false
+      local _callback_keybindings = nil
 
       keybindings.open(test_scripts, function(new_keybindings)
-        callback_called = true
-        callback_keybindings = new_keybindings
+        _callback_called = true
+        _callback_keybindings = new_keybindings
       end)
 
       keybindings.set_keybinding("build", "<leader>b")

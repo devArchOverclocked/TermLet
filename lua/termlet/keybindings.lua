@@ -196,7 +196,6 @@ local function render_ui()
 
     table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
     table.insert(lines, "  ╰" .. string.rep("─", box_width - 2) .. "╯")
-
   elseif state.mode == "input" then
     -- Text input mode UI for typing notation like <leader>b
     local box_width = math.max(width - 4, 50)
@@ -403,7 +402,10 @@ local function apply_captured_keybinding(keybinding_str)
     -- Check for conflicts
     local conflict = check_conflict(keybinding_str, script.name)
     if conflict then
-      vim.notify("Warning: Keybinding '" .. keybinding_str .. "' is already used by '" .. conflict .. "'", vim.log.levels.WARN)
+      vim.notify(
+        "Warning: Keybinding '" .. keybinding_str .. "' is already used by '" .. conflict .. "'",
+        vim.log.levels.WARN
+      )
     end
 
     state.keybindings[script.name] = keybinding_str
@@ -587,20 +589,20 @@ local function enter_input_mode()
       end
 
       -- Only allow printable characters and angle-bracket notation chars
-      local char = raw
+      local _char = raw
       if #notation == 1 then
-        char = notation
+        _char = notation
       elseif notation == "<lt>" then
-        char = "<"
+        _char = "<"
       elseif notation == "<Space>" then
-        char = " "
+        _char = " "
       else
         -- For modifier keys like <C-x>, <A-x>, ignore them as raw input
         -- since user is typing notation text
         return
       end
 
-      state.input_text = state.input_text .. char
+      state.input_text = state.input_text .. _char
       render_ui()
     end)
   end, state.on_key_ns)
@@ -831,7 +833,10 @@ function M.set_keybinding(script_name, keybinding)
     -- Check for conflicts
     local conflict = check_conflict(keybinding, script_name)
     if conflict then
-      vim.notify("Warning: Keybinding '" .. keybinding .. "' is already used by '" .. conflict .. "'", vim.log.levels.WARN)
+      vim.notify(
+        "Warning: Keybinding '" .. keybinding .. "' is already used by '" .. conflict .. "'",
+        vim.log.levels.WARN
+      )
     end
     state.keybindings[script_name] = keybinding
   end

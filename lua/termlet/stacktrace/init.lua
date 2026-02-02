@@ -316,14 +316,13 @@ function M.setup(user_config)
       local handle, err = vim.loop.fs_scandir(parser_dir)
       if not handle then
         -- Directory doesn't exist or isn't readable - skip auto-discovery
-        vim.notify(
-          "[TermLet] Parser auto-discovery skipped: " .. (err or "unknown error"),
-          vim.log.levels.DEBUG
-        )
+        vim.notify("[TermLet] Parser auto-discovery skipped: " .. (err or "unknown error"), vim.log.levels.DEBUG)
       else
         while true do
           local name, type = vim.loop.fs_scandir_next(handle)
-          if not name then break end
+          if not name then
+            break
+          end
           -- Load .lua files (excluding init.lua if present)
           if type == "file" and name:match("%.lua$") and name ~= "init.lua" then
             local lang_name = name:match("^(.+)%.lua$")
@@ -346,10 +345,7 @@ function M.setup(user_config)
         )
       end
     else
-      vim.notify(
-        "[TermLet] Failed to load built-in parser '" .. lang .. "'",
-        vim.log.levels.WARN
-      )
+      vim.notify("[TermLet] Failed to load built-in parser '" .. lang .. "'", vim.log.levels.WARN)
     end
   end
 

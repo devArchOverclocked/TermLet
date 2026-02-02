@@ -1,0 +1,72 @@
+name: Bug Report
+description: Report a bug in TermLet.nvim
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Please fill out the information below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Open Neovim with TermLet configured
+        2. Run command '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened. Include error messages if applicable.
+    validations:
+      required: true
+
+  - type: input
+    id: nvim-version
+    attributes:
+      label: Neovim Version
+      description: "Output of `nvim --version` (first line)"
+      placeholder: "NVIM v0.10.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: TermLet Configuration
+      description: Your relevant TermLet setup/config (if applicable).
+      render: lua

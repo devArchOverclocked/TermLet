@@ -71,14 +71,17 @@ local M = {
     -- Look for JavaScript-specific indicators
     for i = math.max(1, index - 3), math.min(#lines, index + 3) do
       local line = lines[i]
-      if line and (
-        line:match("Error:") or
-        line:match("at%s+") or
-        line:match("%.js:") or
-        line:match("%.jsx:") or
-        line:match("%.ts:") or
-        line:match("%.tsx:")
-      ) then
+      if
+        line
+        and (
+          line:match("Error:")
+          or line:match("at%s+")
+          or line:match("%.js:")
+          or line:match("%.jsx:")
+          or line:match("%.ts:")
+          or line:match("%.tsx:")
+        )
+      then
         return true
       end
     end

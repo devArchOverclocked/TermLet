@@ -72,12 +72,14 @@ local M = {
     -- Look for language-specific indicators in nearby lines
     for i = math.max(1, index - 3), math.min(#lines, index + 3) do
       local line = lines[i]
-      if line and (
-        line:match("Error:") or
-        line:match("Exception:") or
-        line:match("Traceback")
-        -- Add more patterns specific to your language
-      ) then
+      if
+        line
+        and (
+          line:match("Error:")
+          or line:match("Exception:")
+          or line:match("Traceback") -- Add more patterns specific to your language
+        )
+      then
         return true
       end
     end
