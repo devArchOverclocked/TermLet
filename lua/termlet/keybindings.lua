@@ -589,20 +589,20 @@ local function enter_input_mode()
       end
 
       -- Only allow printable characters and angle-bracket notation chars
-      local _char = raw
+      local char
       if #notation == 1 then
-        _char = notation
+        char = notation
       elseif notation == "<lt>" then
-        _char = "<"
+        char = "<"
       elseif notation == "<Space>" then
-        _char = " "
+        char = " "
       else
         -- For modifier keys like <C-x>, <A-x>, ignore them as raw input
         -- since user is typing notation text
         return
       end
 
-      state.input_text = state.input_text .. _char
+      state.input_text = state.input_text .. char
       render_ui()
     end)
   end, state.on_key_ns)

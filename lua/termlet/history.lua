@@ -141,7 +141,7 @@ end
 --- Format a timestamp in human-readable format
 ---@param timestamp number Unix timestamp
 ---@return string Formatted timestamp
-local function format_timestamp(timestamp)
+local function _format_timestamp(timestamp)
   return os.date("%Y-%m-%d %H:%M:%S", timestamp)
 end
 
@@ -151,7 +151,7 @@ end
 ---@param is_selected boolean Whether this entry is selected
 ---@param width number Available width for the line
 ---@return string Formatted line
-local function format_history_line(entry, index, is_selected, width)
+local function format_history_line(entry, _index, is_selected, _width)
   local prefix = is_selected and "  > " or "    "
 
   -- Status icon
@@ -183,7 +183,7 @@ end
 
 --- Get the help text lines
 ---@return table List of help text lines
-local function get_help_lines()
+local function _get_help_lines()
   return {
     "",
     "  Keybindings:",
