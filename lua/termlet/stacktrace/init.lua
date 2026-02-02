@@ -306,24 +306,50 @@ function M.setup(user_config)
   M.clear_parsers()
 
   -- Load built-in language parsers
-  if config.languages then
-    for _, lang in ipairs(config.languages) do
-      local parser_path = "termlet.parsers." .. lang
-      local success, parser_module = pcall(require, parser_path)
-      if success and parser_module then
-        local ok, err = M.register_parser(parser_module)
-        if not ok then
-          vim.notify(
-            "[TermLet] Failed to register built-in parser '" .. lang .. "': " .. (err or "unknown error"),
-            vim.log.levels.WARN
-          )
-        end
-      else
+  -- If config.languages is empty or not specified, load all available built-in parsers
+  local languages_to_load = config.languages
+  if not languages_to_load or #languages_to_load == 0 then
+    -- Auto-discover all available built-in parsers
+    languages_to_load = {}
+    local parser_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h") .. "/parsers"
+    if vim.fn.isdirectory(parser_dir) == 1 then
+      local handle, err = vim.loop.fs_scandir(parser_dir)
+      if not handle then
+        -- Directory doesn't exist or isn't readable - skip auto-discovery
         vim.notify(
-          "[TermLet] Failed to load built-in parser '" .. lang .. "'",
+          "[TermLet] Parser auto-discovery skipped: " .. (err or "unknown error"),
+          vim.log.levels.DEBUG
+        )
+      else
+        while true do
+          local name, type = vim.loop.fs_scandir_next(handle)
+          if not name then break end
+          -- Load .lua files (excluding init.lua if present)
+          if type == "file" and name:match("%.lua$") and name ~= "init.lua" then
+            local lang_name = name:match("^(.+)%.lua$")
+            table.insert(languages_to_load, lang_name)
+          end
+        end
+      end
+    end
+  end
+
+  for _, lang in ipairs(languages_to_load) do
+    local parser_path = "termlet.parsers." .. lang
+    local success, parser_module = pcall(require, parser_path)
+    if success and parser_module then
+      local ok, err = M.register_parser(parser_module)
+      if not ok then
+        vim.notify(
+          "[TermLet] Failed to register built-in parser '" .. lang .. "': " .. (err or "unknown error"),
           vim.log.levels.WARN
         )
       end
+    else
+      vim.notify(
+        "[TermLet] Failed to load built-in parser '" .. lang .. "'",
+        vim.log.levels.WARN
+      )
     end
   end
 

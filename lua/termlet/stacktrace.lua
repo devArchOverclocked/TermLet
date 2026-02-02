@@ -26,6 +26,23 @@ local output_buffer = {}
 -- Load highlight module once at module level with pcall guard
 local highlight_ok, highlight_module = pcall(require, "termlet.highlight")
 
+---Normalize parser plugin format to match expected format
+---Parser plugin returns: { file_path, line_number, column_number, parser_name }
+---Expected format: { path, original_path, line, column, context }
+---@param file_info table|nil The file info from parser
+---@param line string The raw line text
+---@return table|nil The normalized file info or nil
+local function normalize_parser_result(file_info, line)
+  if file_info and file_info.file_path and not file_info.path then
+    file_info.original_path = file_info.file_path
+    file_info.path = file_info.file_path
+    file_info.line = file_info.line_number
+    file_info.column = file_info.column_number
+    file_info.raw_line = line
+  end
+  return file_info
+end
+
 ---Register a new stack trace pattern for a language
 ---@param language string The language identifier (e.g., 'python', 'csharp')
 ---@param pattern_config table Pattern configuration
@@ -330,7 +347,9 @@ function M.process_terminal_output(data, cwd, buffer_id)
       local cleaned_line = M.strip_ansi(line)
       add_to_buffer(cleaned_line)
 
-      local file_info = M.process_line(cleaned_line, cwd)
+      -- Use parse_line if available (from parser plugin), otherwise fall back to process_line
+      local file_info = M.parse_line and M.parse_line(cleaned_line, cwd) or M.process_line(cleaned_line, cwd)
+      file_info = normalize_parser_result(file_info, cleaned_line)
       if file_info then
         local buffer_line = terminal_line_count + line_offset
         file_info.buffer_line = buffer_line
@@ -454,7 +473,9 @@ function M.scan_buffer_for_stacktraces(buffer_id, cwd)
 
   for i, line in ipairs(lines) do
     if line and line ~= "" then
-      local file_info = M.process_line(line, cwd)
+      -- Use parse_line if available (from parser plugin), otherwise fall back to process_line
+      local file_info = M.parse_line and M.parse_line(line, cwd) or M.process_line(line, cwd)
+      file_info = normalize_parser_result(file_info, line)
       if file_info then
         file_info.buffer_line = i
         table.insert(results, file_info)

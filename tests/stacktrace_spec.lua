@@ -576,6 +576,69 @@ describe("termlet.stacktrace", function()
       assert.are.equal(42, result.line_number)
       assert.are.equal(15, result.column_number)
     end)
+
+    it("should parse MSBuild error format with path containing forward slash", function()
+      local line = 'BV/APITest.cs(1887,62): error CS1503: Argument 1: cannot convert from'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("BV/APITest.cs", result.file_path)
+      assert.are.equal(1887, result.line_number)
+      assert.are.equal(62, result.column_number)
+    end)
+
+    it("should parse MSBuild error format with absolute Windows path", function()
+      local line = 'C:\\Projects\\MyApp\\Program.cs(10,5): warning CS0168: The variable'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("C:/Projects/MyApp/Program.cs", result.file_path)
+      assert.are.equal(10, result.line_number)
+      assert.are.equal(5, result.column_number)
+    end)
+
+    it("should parse MSBuild error format without column number", function()
+      local line = 'src/Utils.cs(123): error CS0246: The type or namespace'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("src/Utils.cs", result.file_path)
+      assert.are.equal(123, result.line_number)
+      assert.is_nil(result.column_number)
+    end)
+
+    it("should parse .NET exception with deeply nested path", function()
+      local line = "   at MyNamespace.MyClass.MyMethod() in /home/dev/project/src/core/MyClass.cs:line 42"
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("/home/dev/project/src/core/MyClass.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+    end)
+
+    it("should parse MSBuild error with path containing spaces", function()
+      local line = 'My Project/My File.cs(10,5): error CS1234: The type or namespace'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      assert.are.equal("My Project/My File.cs", result.file_path)
+      assert.are.equal(10, result.line_number)
+      assert.are.equal(5, result.column_number)
+    end)
+
+    it("should parse MSBuild error with Windows path using backslashes", function()
+      -- Test that the pattern correctly matches Windows backslash paths
+      -- In real terminal output, this would be: C:\Users\Dev\Project\File.cs(42,15): error
+      -- In Lua string literals, we need to escape backslashes, so \\ represents one backslash
+      local line = 'C:\\Users\\Dev\\Project\\File.cs(42,15): error CS1234: Error message'
+      local result = stacktrace.parse_line(line)
+
+      assert.is_not_nil(result)
+      -- The resolve_path function normalizes backslashes to forward slashes
+      assert.are.equal("C:/Users/Dev/Project/File.cs", result.file_path)
+      assert.are.equal(42, result.line_number)
+      assert.are.equal(15, result.column_number)
+    end)
   end)
 
   describe("JavaScript parser", function()
@@ -1280,6 +1343,64 @@ describe("termlet.stacktrace", function()
 
       local parser = termlet.stacktrace.get_parser("python")
       assert.is_not_nil(parser)
+    end)
+
+    it("should detect MSBuild errors in terminal buffer via goto_stacktrace", function()
+      termlet.setup({
+        scripts = {},
+        stacktrace = {
+          enabled = true,
+          -- Empty languages array should load all parsers (including csharp)
+          languages = {}
+        }
+      })
+
+      -- Create a buffer with MSBuild error output
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {
+        "Building project...",
+        "CCSO/engines/bv/Engine.cs(20,19): error CS1061: 'BVEngine' does not contain a definition for 'Run2'",
+        "Build failed."
+      }
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+      -- Simulate stacktrace detection (as would happen in terminal output processing)
+      local cwd = vim.fn.getcwd()
+      local results = termlet.stacktrace.scan_buffer_for_stacktraces(buf, cwd)
+
+      -- Verify that the MSBuild error was detected
+      assert.are.equal(1, #results)
+      assert.are.equal("CCSO/engines/bv/Engine.cs", results[1].file_path)
+      assert.are.equal(20, results[1].line_number)
+      assert.are.equal(19, results[1].column_number)
+
+      -- Verify metadata was stored at the correct line (line 2)
+      local file_info = termlet.stacktrace.find_nearest_metadata(buf, 2)
+      assert.is_not_nil(file_info)
+      assert.are.equal("CCSO/engines/bv/Engine.cs", file_info.file_path)
+      assert.are.equal(20, file_info.line_number)
+      assert.are.equal(19, file_info.column_number)
+
+      -- Cleanup
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should load all built-in parsers when languages array is empty", function()
+      termlet.setup({
+        scripts = {},
+        stacktrace = {
+          enabled = true,
+          languages = {} -- Should load all parsers
+        }
+      })
+
+      -- Verify that csharp parser is loaded
+      local csharp_parser = termlet.stacktrace.get_parser("csharp")
+      assert.is_not_nil(csharp_parser, "C# parser should be loaded when languages={}")
+
+      -- Verify other common parsers are also loaded
+      local python_parser = termlet.stacktrace.get_parser("python")
+      assert.is_not_nil(python_parser, "Python parser should be loaded when languages={}")
     end)
   end)
 end)
