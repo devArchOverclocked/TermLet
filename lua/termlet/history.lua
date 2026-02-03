@@ -138,13 +138,6 @@ local function format_execution_time(seconds)
   end
 end
 
---- Format a timestamp in human-readable format
----@param timestamp number Unix timestamp
----@return string Formatted timestamp
-local function _format_timestamp(timestamp)
-  return os.date("%Y-%m-%d %H:%M:%S", timestamp)
-end
-
 --- Format a history entry for display
 ---@param entry table History entry
 ---@param index number Index in the list
@@ -179,25 +172,6 @@ local function format_history_line(entry, _index, is_selected, _width)
     prefix, status_icon, display_name, exec_time, exit_str, time_str)
 
   return line
-end
-
---- Get the help text lines
----@return table List of help text lines
-local function _get_help_lines()
-  return {
-    "",
-    "  Keybindings:",
-    "  ────────────────────────────────",
-    "  j / ↓        Move down",
-    "  k / ↑        Move up",
-    "  Enter        Re-run selected script",
-    "  c            Clear history",
-    "  Escape       Close history",
-    "  q            Close history",
-    "  gg           Go to first entry",
-    "  G            Go to last entry",
-    "",
-  }
 end
 
 --- Render the history UI
