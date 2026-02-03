@@ -15,6 +15,12 @@ local keybindings = require("termlet.keybindings")
 -- Load history module
 local history = require("termlet.history")
 
+-- Load filter module
+local filter = require("termlet.filter")
+
+-- Load filter UI module
+local filter_ui = require("termlet.filter_ui")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -42,6 +48,12 @@ local config = {
     max_saved_buffers = 5,       -- Maximum number of hidden buffers to keep
     focus = "previous",          -- "terminal" | "previous" | "none" - where to place focus after opening terminal
     auto_insert = false,         -- Auto-enter insert mode when focus="terminal"
+    filters = {
+      enabled = false,           -- Enable output filtering
+      show_only = {},            -- Only show lines matching these patterns
+      hide = {},                 -- Hide lines matching these patterns
+      highlight = {},            -- Custom highlighting rules: { pattern = "ERROR", color = "#ff0000" }
+    },
   },
   search = {
     exclude_dirs = {
@@ -96,6 +108,12 @@ local active_terminals = {}
 
 -- Store saved terminal buffers for output persistence
 local saved_buffers = {}
+
+-- Store active filters per buffer
+local active_filters = {}
+
+-- Store original script-level filter config per buffer (preserved across preset changes)
+local original_script_filters = {}
 
 -- Literal string replacement to avoid Lua pattern issues with special chars
 -- Replaces ALL occurrences of placeholder in str
@@ -313,6 +331,11 @@ function M.create_floating_terminal(opts)
     pattern = tostring(win),
     callback = function()
       active_terminals[win] = nil
+
+      -- Clear active filters, original script config, and cached original lines for this buffer
+      active_filters[buf] = nil
+      original_script_filters[buf] = nil
+      filter.discard_cache(buf)
 
       -- Handle output persistence
       if term_config.output_persistence == "buffer" and vim.api.nvim_buf_is_valid(buf) then
@@ -563,6 +586,11 @@ local function execute_script(script)
     end
   end
 
+  -- Store filters for this buffer
+  local script_filters = vim.tbl_deep_extend("force", config.terminal.filters or {}, script.filters or {})
+  active_filters[buf] = script_filters
+  original_script_filters[buf] = vim.deepcopy(script_filters)
+
   -- Determine command based on file extension or explicit command
   local cmd = script.cmd or ("./" .. script_name)
 
@@ -613,6 +641,10 @@ local function execute_script(script)
               description = script.description,
             },
           })
+        end
+        -- Apply filters after process completes
+        if active_filters[buf] and active_filters[buf].enabled and buf and vim.api.nvim_buf_is_valid(buf) then
+          filter.apply_filters(buf, active_filters[buf])
         end
       end)
     end,
@@ -735,6 +767,9 @@ function M.setup(user_config)
   if config.history and config.history.max_entries then
     history.set_max_entries(config.history.max_entries)
   end
+
+  -- Initialize filter module with configuration
+  filter.setup(config.terminal.filters)
 
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
@@ -891,6 +926,9 @@ M.stacktrace = stacktrace
 
 -- Highlight module access
 M.highlight = highlight
+
+-- Filter module access
+M.filter = filter
 
 -- Get file info at cursor position in terminal buffer
 function M.get_stacktrace_at_cursor()
@@ -1278,5 +1316,137 @@ end
 
 --- Expose history module for advanced usage
 M.history = history
+
+-- ============================================================================
+-- Filter Management API
+-- ============================================================================
+
+--- Apply a filter preset to the current terminal buffer
+---@param preset string Preset name ("errors", "warnings", "info", "all")
+---@return boolean Success
+function M.apply_filter_preset(preset)
+  local buf = vim.api.nvim_get_current_buf()
+  return M.apply_filter_preset_to_buf(buf, preset)
+end
+
+--- Apply a filter preset to a specific buffer (no buffer switching needed)
+---@param buf number Buffer ID
+---@param preset string Preset name ("errors", "warnings", "info", "all")
+---@return boolean Success
+function M.apply_filter_preset_to_buf(buf, preset)
+  if not active_filters[buf] then
+    vim.notify("Not a TermLet terminal buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  local filter_config = filter.create_preset(preset)
+  active_filters[buf] = filter_config
+
+  filter.apply_filters(buf, filter_config)
+  vim.notify("Applied filter preset: " .. preset, vim.log.levels.INFO)
+  return true
+end
+
+--- Toggle filters on/off for the current terminal buffer
+---@return boolean New enabled state
+function M.toggle_filters()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if not active_filters[buf] then
+    vim.notify("Not in a TermLet terminal buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  local enabled = filter.toggle_enabled(buf, active_filters[buf])
+  local status = enabled and "enabled" or "disabled"
+  vim.notify("Filters " .. status, vim.log.levels.INFO)
+  return enabled
+end
+
+--- Disable filters for a specific buffer (no buffer switching needed)
+--- Restores the original script-level filter config with enabled=false.
+---@param buf number Buffer ID
+function M.disable_filters_for_buf(buf)
+  if not active_filters[buf] then
+    return
+  end
+
+  -- Restore original script config if available, with enabled=false
+  if original_script_filters[buf] then
+    active_filters[buf] = vim.deepcopy(original_script_filters[buf])
+  end
+  active_filters[buf].enabled = false
+  filter.clear_buffer(buf)
+  vim.notify("Filters disabled", vim.log.levels.INFO)
+end
+
+--- Clear filters from the current terminal buffer
+---@return boolean Success
+function M.clear_filters()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if not active_filters[buf] then
+    vim.notify("Not in a TermLet terminal buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  filter.clear_buffer(buf)
+  vim.notify("Cleared filters", vim.log.levels.INFO)
+  return true
+end
+
+--- Reapply current filters to the terminal buffer
+---@return boolean Success
+function M.reapply_filters()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if not active_filters[buf] then
+    vim.notify("Not in a TermLet terminal buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  if not active_filters[buf].enabled then
+    vim.notify("Filters are disabled", vim.log.levels.INFO)
+    return false
+  end
+
+  local hidden = filter.apply_filters(buf, active_filters[buf])
+  vim.notify("Filters reapplied. Hidden lines: " .. hidden, vim.log.levels.INFO)
+  return true
+end
+
+--- Get current filter configuration for the terminal buffer
+---@return table|nil Filter configuration
+function M.get_current_filters()
+  local buf = vim.api.nvim_get_current_buf()
+  return active_filters[buf]
+end
+
+--- Open the interactive filter UI for the current terminal buffer
+---@return boolean Success
+function M.open_filter_ui()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if not active_filters[buf] then
+    vim.notify("Not in a TermLet terminal buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  return filter_ui.open(buf)
+end
+
+--- Toggle the filter UI for the current terminal buffer
+---@return boolean Success
+function M.toggle_filter_ui()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if not active_filters[buf] then
+    vim.notify("Not in a TermLet terminal buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  filter_ui.toggle(buf)
+  return true
+end
 
 return M
