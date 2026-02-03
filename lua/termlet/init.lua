@@ -79,8 +79,8 @@ local config = {
     max_depth = 5, -- Maximum recursion depth for searching
   },
   menu = {
-    width_ratio = 0.6,
-    height_ratio = 0.5,
+    width_ratio = 0.7,
+    height_ratio = 0.6,
     border = "rounded",
     title = " TermLet Scripts ",
   },

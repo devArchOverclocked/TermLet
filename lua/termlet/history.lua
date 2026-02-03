@@ -24,7 +24,9 @@ local default_config = {
     success = "DiagnosticOk",
     error = "DiagnosticError",
     title = "Title",
+    header = "NonText",
     help = "Comment",
+    time_col = "Comment",
   },
 }
 
@@ -110,7 +112,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [Enter] Re-run  [c] Clear  [q] Close ",
+    footer = " Enter: Re-run  c: Clear  q: Close ",
     footer_pos = "center",
   }
 end
@@ -140,36 +142,62 @@ end
 
 --- Format a history entry for display
 ---@param entry table History entry
+---@param index number Index in the list
 ---@param is_selected boolean Whether this entry is selected
+---@param width number Available width
 ---@return string Formatted line
-local function format_history_line(entry, is_selected)
-  local prefix = is_selected and "  > " or "    "
+---@return table Highlight regions for this line
+local function format_history_line(entry, index, is_selected, width)
+  local pointer = is_selected and " > " or "   "
+  local number_label = string.format(" %d. ", index)
 
-  -- Status icon
-  local status_icon = entry.exit_code == 0 and "✓" or "✗"
+  -- Status icon with surrounding space for readability
+  local status_icon = entry.exit_code == 0 and " ✓ " or " ✗ "
 
-  -- Script name (truncate if needed)
+  -- Script name (generous column)
   local name = entry.script_name or "unknown"
-  local name_width = math.min(#name, 25)
-  local display_name = name:sub(1, name_width)
-  if #name > name_width then
-    display_name = display_name:sub(1, name_width - 1) .. "…"
+  local name_col_width = math.max(math.floor(width * 0.30), 15)
+  local display_name = name:sub(1, name_col_width)
+  if #name > name_col_width then
+    display_name = display_name:sub(1, name_col_width - 1) .. "…"
   end
+  local padded_name = display_name .. string.rep(" ", name_col_width - #display_name)
 
   -- Execution time
   local exec_time = format_execution_time(entry.execution_time)
+  local time_col = string.format("%-10s", exec_time)
+
+  -- Exit code
+  local exit_str = string.format("exit:%-4d", entry.exit_code or -1)
 
   -- Timestamp
   local time_str = os.date("%H:%M:%S", entry.timestamp)
 
-  -- Exit code
-  local exit_str = string.format("exit:%d", entry.exit_code or -1)
-
   -- Build the line
-  local line =
-    string.format("%s%s  %-25s  %8s  %8s  %s", prefix, status_icon, display_name, exec_time, exit_str, time_str)
+  local line = pointer
+    .. number_label
+    .. status_icon
+    .. " "
+    .. padded_name
+    .. "  "
+    .. time_col
+    .. "  "
+    .. exit_str
+    .. "  "
+    .. time_str
 
-  return line
+  -- Track highlight regions
+  local regions = {}
+  local icon_start = #pointer + #number_label
+  local icon_end = icon_start + #status_icon
+  local status_group = entry.exit_code == 0 and "success" or "error"
+  table.insert(regions, { col_start = icon_start, col_end = icon_end, group = status_group })
+
+  -- Time column at the end
+  local time_start = #line - #time_str
+  table.insert(regions, { col_start = time_start, col_end = #line, group = "time_col" })
+
+  return line, regions
 end
 
 --- Render the history UI
@@ -180,6 +208,7 @@ local function render_history()
 
   local win_opts = calculate_window_opts(state.config)
   local width = win_opts.width - 2 -- Account for borders
+  local sep_width = math.max(width - 8, 30)
 
   -- Clear existing content and highlights
   vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
@@ -189,41 +218,50 @@ local function render_history()
 
   -- Add header
   table.insert(lines, "")
-  local header = string.format("  %s  %-25s  %8s  %8s  %s", " ", "Script", "Duration", "Exit", "Time")
+  local name_col_width = math.max(math.floor(width * 0.30), 15)
+  local header = "         "
+    .. "   "
+    .. " "
+    .. string.format("%-" .. name_col_width .. "s", "Script")
+    .. "  "
+    .. string.format("%-10s", "Duration")
+    .. "  "
+    .. string.format("%-9s", "Exit")
+    .. "  "
+    .. "Time"
   table.insert(lines, header)
-  table.insert(lines, "  " .. string.rep("─", width - 4))
+  table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+  table.insert(lines, "    " .. string.rep("─", sep_width))
+  table.insert(lines, "")
 
   -- Add history entries
   if #state.entries == 0 then
     table.insert(lines, "")
-    table.insert(lines, "    No history available")
+    table.insert(lines, "    No history available.")
     table.insert(lines, "")
   else
     local selected_index = state.selected_index or 1
     for i, entry in ipairs(state.entries) do
       local is_selected = (i == selected_index)
-      local line = format_history_line(entry, is_selected)
+      local line, regions = format_history_line(entry, i, is_selected, width)
       table.insert(lines, line)
+      local line_idx = #lines - 1
 
       if is_selected then
-        table.insert(highlights, { line = #lines - 1, group = state.config.highlight.selected })
+        table.insert(highlights, { line = line_idx, group = state.config.highlight.selected })
       end
 
-      -- Color-code by exit status
-      if entry.exit_code == 0 then
-        table.insert(highlights, {
-          line = #lines - 1,
-          col_start = 4,
-          col_end = 7,
-          group = state.config.highlight.success,
-        })
-      else
-        table.insert(highlights, {
-          line = #lines - 1,
-          col_start = 4,
-          col_end = 7,
-          group = state.config.highlight.error,
-        })
+      -- Apply per-region highlights
+      for _, region in ipairs(regions) do
+        local hl_group = state.config.highlight[region.group]
+        if hl_group then
+          table.insert(highlights, {
+            line = line_idx,
+            col_start = region.col_start,
+            col_end = region.col_end,
+            group = hl_group,
+          })
+        end
       end
     end
   end

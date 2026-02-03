@@ -19,15 +19,18 @@ local state = {
 
 -- Default menu configuration
 local default_config = {
-  width_ratio = 0.6,
-  height_ratio = 0.5,
+  width_ratio = 0.7,
+  height_ratio = 0.6,
   border = "rounded",
   title = " TermLet Scripts ",
   highlight = {
     selected = "CursorLine",
     title = "Title",
+    header = "NonText",
     help = "Comment",
     search = "Search",
+    description = "Comment",
+    name = "Normal",
   },
 }
 
@@ -59,7 +62,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [Enter] Run  [/] Search  [?] Help  [q] Close ",
+    footer = " Enter: Run  /: Search  ?: Help  q: Close ",
     footer_pos = "center",
   }
 end
@@ -70,48 +73,62 @@ end
 ---@param is_selected boolean Whether this script is selected
 ---@param width number Available width for the line
 ---@return string Formatted line
-local function format_script_line(script, _index, is_selected, width)
-  local prefix = is_selected and "  > " or "    "
+---@return table Highlight regions for this line
+local function format_script_line(script, index, is_selected, width)
+  local pointer = is_selected and " > " or "   "
+  local number_label = string.format(" %d. ", index)
   local name = script.name or "unnamed"
   local description = script.description or ""
 
-  -- Calculate space for description
-  local name_width = math.min(#name, math.floor(width * 0.4))
-  local padded_name = name:sub(1, name_width)
+  -- Use generous column widths for readability
+  local name_col_width = math.max(math.floor(width * 0.35), 15)
+  local display_name = name:sub(1, name_col_width)
+  local padded_name = display_name .. string.rep(" ", name_col_width - #display_name)
 
-  if #padded_name < name_width then
-    padded_name = padded_name .. string.rep(" ", name_width - #padded_name)
-  end
+  local line = pointer .. number_label .. padded_name
 
-  local line = prefix .. padded_name
+  local regions = {}
+
+  -- Track where the name starts/ends for highlighting
+  local name_start = #pointer + #number_label
+  local name_end = name_start + #display_name
+  table.insert(regions, { col_start = name_start, col_end = name_end, group = "name" })
 
   if description ~= "" then
-    local desc_width = width - #line - 4
+    local separator = "  -  "
+    local desc_width = width - #line - #separator - 2
     if desc_width > 0 then
       local truncated_desc = description:sub(1, desc_width)
-      line = line .. "  " .. truncated_desc
+      local desc_start = #line + #separator
+      line = line .. separator .. truncated_desc
+      table.insert(regions, { col_start = desc_start, col_end = #line, group = "description" })
     end
   end
 
-  return line
+  return line, regions
 end
 
 --- Get the help text lines
+---@param width number Available width
 ---@return table List of help text lines
-local function get_help_lines()
+local function get_help_lines(width)
+  local sep_width = math.max(width - 8, 30)
   return {
     "",
-    "  Keybindings:",
-    "  ────────────────────────────────",
-    "  j / ↓        Move down",
-    "  k / ↑        Move up",
-    "  Enter        Run selected script",
-    "  /            Search/filter scripts",
-    "  Escape       Cancel search / Close menu",
-    "  q            Close menu",
-    "  ?            Toggle this help",
-    "  gg           Go to first script",
-    "  G            Go to last script",
+    "    Keybindings",
+    "    " .. string.rep("─", sep_width),
+    "",
+    "    j / Down       Move down",
+    "    k / Up         Move up",
+    "    Enter          Run selected script",
+    "    /              Search / filter scripts",
+    "    Escape         Cancel search / Close",
+    "    q              Close menu",
+    "    ?              Toggle this help",
+    "    gg             Go to first script",
+    "    G              Go to last script",
+    "",
+    "    " .. string.rep("─", sep_width),
     "",
   }
 end
@@ -148,6 +165,7 @@ local function render_menu()
 
   local win_opts = calculate_window_opts(state.config)
   local width = win_opts.width - 2 -- Account for borders
+  local sep_width = math.max(width - 8, 30)
 
   -- Clear existing content and highlights
   vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
@@ -157,37 +175,64 @@ local function render_menu()
 
   -- Add search bar if in search mode
   if state.search_mode then
-    local search_line = "  Search: " .. state.search_query .. "█"
-    table.insert(lines, search_line)
     table.insert(lines, "")
-    table.insert(highlights, { line = 0, group = state.config.highlight.search })
+    local search_line = "    / " .. state.search_query .. "█"
+    table.insert(lines, search_line)
+    table.insert(lines, "    " .. string.rep("─", sep_width))
+    table.insert(lines, "")
+    table.insert(highlights, { line = 1, group = state.config.highlight.search })
   else
     table.insert(lines, "")
   end
 
   -- Add script list or help
   if state.show_help then
-    for _, help_line in ipairs(get_help_lines()) do
+    for _, help_line in ipairs(get_help_lines(width)) do
       table.insert(lines, help_line)
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.help })
     end
   else
     if #state.filtered_scripts == 0 then
       table.insert(lines, "")
+      table.insert(lines, "")
       if state.search_query ~= "" then
-        table.insert(lines, "    No scripts match your search")
+        table.insert(lines, "    No scripts match your search.")
       else
-        table.insert(lines, "    No scripts configured")
+        table.insert(lines, "    No scripts configured.")
       end
       table.insert(lines, "")
     else
+      -- Header row
+      local name_col_width = math.max(math.floor(width * 0.35), 15)
+      local header = "        " .. string.format("%-" .. name_col_width .. "s", "Name") .. "  -  " .. "Description"
+      table.insert(lines, header)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+      table.insert(lines, "    " .. string.rep("─", sep_width))
+      table.insert(lines, "")
+
       for i, script in ipairs(state.filtered_scripts) do
         local is_selected = (i == state.selected_index)
-        local line = format_script_line(script, i, is_selected, width)
+        local line, regions = format_script_line(script, i, is_selected, width)
         table.insert(lines, line)
+        local line_idx = #lines - 1
 
         if is_selected then
-          table.insert(highlights, { line = #lines - 1, group = state.config.highlight.selected })
+          table.insert(highlights, { line = line_idx, group = state.config.highlight.selected })
+        end
+
+        -- Apply per-region highlights
+        for _, region in ipairs(regions) do
+          if not is_selected then
+            local hl_group = state.config.highlight[region.group]
+            if hl_group then
+              table.insert(highlights, {
+                line = line_idx,
+                col_start = region.col_start,
+                col_end = region.col_end,
+                group = hl_group,
+              })
+            end
+          end
         end
       end
     end
@@ -206,7 +251,11 @@ local function render_menu()
 
   -- Apply highlights
   for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+    if hl.col_start and hl.col_end then
+      vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, hl.col_start, hl.col_end)
+    else
+      vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+    end
   end
 end
 
