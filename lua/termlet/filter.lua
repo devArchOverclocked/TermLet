@@ -7,9 +7,9 @@ local M = {}
 -- Default configuration
 local config = {
   enabled = false,
-  show_only = {},      -- Only show lines matching these patterns
-  hide = {},           -- Hide lines matching these patterns
-  highlight = {},      -- Custom highlighting rules
+  show_only = {}, -- Only show lines matching these patterns
+  hide = {}, -- Hide lines matching these patterns
+  highlight = {}, -- Custom highlighting rules
 }
 
 -- Namespace for extmarks
@@ -92,7 +92,7 @@ local function find_highlights(line, highlight_rules)
 
       table.insert(matches, {
         start = start_pos - 1, -- 0-indexed for extmarks
-        ["end"] = end_pos,     -- exclusive end for extmarks
+        ["end"] = end_pos, -- exclusive end for extmarks
         color = rule.color,
         pattern = pattern,
       })

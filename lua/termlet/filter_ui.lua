@@ -4,8 +4,6 @@
 
 local M = {}
 
-local filter = require("termlet.filter")
-
 -- UI state
 local ui_state = {
   win = nil,
@@ -67,7 +65,10 @@ local function render_ui()
   table.insert(lines, "│  [1-4] Select  [Enter] Apply      │")
   table.insert(lines, "│  [d] Disable   [q/Esc] Close      │")
   table.insert(lines, "│                                   │")
-  table.insert(lines, "└───────────────────────────────────┘")
+  table.insert(
+    lines,
+    "└───────────────────────────────────┘"
+  )
 
   vim.api.nvim_set_option_value("modifiable", true, { buf = ui_state.buf })
   vim.api.nvim_buf_set_lines(ui_state.buf, 0, -1, false, lines)
