@@ -343,7 +343,7 @@ describe("termlet.history", function()
   describe("integration with execution flow", function()
     it("should maintain history order across multiple operations", function()
       -- Simulate multiple script executions
-      local scripts = {"build", "test", "deploy", "lint"}
+      local scripts = { "build", "test", "deploy", "lint" }
 
       for i, name in ipairs(scripts) do
         history.add_entry({

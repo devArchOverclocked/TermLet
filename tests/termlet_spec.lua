@@ -482,15 +482,9 @@ describe("termlet", function()
         show_status = true,
         status_icons = { running = "RUNNING", success = "OK", error = "FAIL" },
       }
-      assert.is_truthy(
-        termlet._format_terminal_title(cfg, "x", "running"):find("RUNNING", 1, true)
-      )
-      assert.is_truthy(
-        termlet._format_terminal_title(cfg, "x", "success"):find("OK", 1, true)
-      )
-      assert.is_truthy(
-        termlet._format_terminal_title(cfg, "x", "error"):find("FAIL", 1, true)
-      )
+      assert.is_truthy(termlet._format_terminal_title(cfg, "x", "running"):find("RUNNING", 1, true))
+      assert.is_truthy(termlet._format_terminal_title(cfg, "x", "success"):find("OK", 1, true))
+      assert.is_truthy(termlet._format_terminal_title(cfg, "x", "error"):find("FAIL", 1, true))
     end)
 
     it("should handle nil status when show_status is true", function()
@@ -523,7 +517,7 @@ describe("termlet", function()
         scripts = {},
         terminal = { title_pos = "left" },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -535,7 +529,7 @@ describe("termlet", function()
         scripts = {},
         terminal = { title_pos = "right" },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -544,7 +538,7 @@ describe("termlet", function()
 
     it("should apply winhighlight with default highlight groups", function()
       termlet.setup({ scripts = {} })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local winhighlight = vim.api.nvim_get_option_value("winhighlight", { win = win })
@@ -564,7 +558,7 @@ describe("termlet", function()
           },
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local winhighlight = vim.api.nvim_get_option_value("winhighlight", { win = win })
@@ -580,7 +574,7 @@ describe("termlet", function()
           border = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -593,7 +587,7 @@ describe("termlet", function()
           scripts = {},
           terminal = { border = preset },
         })
-        local buf, win = termlet.create_floating_terminal({})
+        local _buf, win = termlet.create_floating_terminal({})
         assert.is_not_nil(win)
       end
     end)
@@ -606,7 +600,7 @@ describe("termlet", function()
           title_icon = "",
         },
       })
-      local buf, win = termlet.create_floating_terminal({ title = "my_build" })
+      local _buf, win = termlet.create_floating_terminal({ title = "my_build" })
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -635,7 +629,7 @@ describe("termlet", function()
           status_icons = { running = "●", success = "✓", error = "✗" },
         },
       })
-      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      local _buf, win = termlet.create_floating_terminal({ title = "build" })
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -659,7 +653,7 @@ describe("termlet", function()
         scripts = {},
         terminal = { border = "none" },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
     end)
 
@@ -672,7 +666,7 @@ describe("termlet", function()
           },
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local winhighlight = vim.api.nvim_get_option_value("winhighlight", { win = win })
@@ -773,7 +767,7 @@ describe("termlet", function()
           status_icons = { running = "●", success = "✓", error = "✗" },
         },
       })
-      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      local _buf, win = termlet.create_floating_terminal({ title = "build" })
       assert.is_not_nil(win)
 
       local updated = termlet._update_terminal_status(win, 0)
@@ -804,7 +798,7 @@ describe("termlet", function()
           status_icons = { running = "●", success = "✓", error = "✗" },
         },
       })
-      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      local _buf, win = termlet.create_floating_terminal({ title = "build" })
       assert.is_not_nil(win)
 
       local updated = termlet._update_terminal_status(win, 1)
@@ -833,7 +827,7 @@ describe("termlet", function()
           show_status = false,
         },
       })
-      local buf, win = termlet.create_floating_terminal({ title = "build" })
+      local _buf, win = termlet.create_floating_terminal({ title = "build" })
       assert.is_not_nil(win)
 
       local updated = termlet._update_terminal_status(win, 0)
@@ -857,7 +851,7 @@ describe("termlet", function()
         scripts = {},
         terminal = { title_pos = "middle" },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -870,7 +864,7 @@ describe("termlet", function()
           scripts = {},
           terminal = { title_pos = pos },
         })
-        local buf, win = termlet.create_floating_terminal({})
+        local _buf, win = termlet.create_floating_terminal({})
         assert.is_not_nil(win)
 
         local win_config = vim.api.nvim_win_get_config(win)
@@ -887,7 +881,7 @@ describe("termlet", function()
           border = { "╭", "─", "╮", "│", "╯" }, -- only 5 elements
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
       -- Should not error — falls back to "rounded"
     end)
@@ -899,7 +893,7 @@ describe("termlet", function()
           border = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
       local win_config = vim.api.nvim_win_get_config(win)
@@ -978,13 +972,25 @@ describe("termlet", function()
     it("should exclude all default directories", function()
       termlet.setup({ scripts = {} })
       local defaults = {
-        "node_modules", ".git", ".svn", ".hg", "dist", "build",
-        "target", "__pycache__", ".cache", ".tox", ".mypy_cache",
-        ".pytest_cache", "vendor", "venv", ".venv", "env",
+        "node_modules",
+        ".git",
+        ".svn",
+        ".hg",
+        "dist",
+        "build",
+        "target",
+        "__pycache__",
+        ".cache",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        "vendor",
+        "venv",
+        ".venv",
+        "env",
       }
       for _, dir in ipairs(defaults) do
-        assert.is_true(termlet._should_exclude_dir(dir, nil),
-          "Expected '" .. dir .. "' to be excluded by defaults")
+        assert.is_true(termlet._should_exclude_dir(dir, nil), "Expected '" .. dir .. "' to be excluded by defaults")
       end
     end)
   end)
@@ -1172,7 +1178,7 @@ describe("termlet", function()
           output_persistence = "none",
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local buf, _win = termlet.create_floating_terminal({})
       assert.is_not_nil(buf)
 
       local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
@@ -1186,7 +1192,7 @@ describe("termlet", function()
           output_persistence = "buffer",
         },
       })
-      local buf, win = termlet.create_floating_terminal({})
+      local buf, _win = termlet.create_floating_terminal({})
       assert.is_not_nil(buf)
 
       local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
@@ -1276,7 +1282,7 @@ describe("termlet", function()
       })
 
       -- Create and close a terminal
-      local buf, win = termlet.create_floating_terminal({ title = "recent_output" })
+      local _buf, win = termlet.create_floating_terminal({ title = "recent_output" })
       vim.api.nvim_win_close(win, true)
 
       -- Wait for save
@@ -1339,7 +1345,7 @@ describe("termlet", function()
 
       -- Create and close multiple terminals
       for i = 1, 3 do
-        local buf, win = termlet.create_floating_terminal({ title = "output_" .. i })
+        local _buf, win = termlet.create_floating_terminal({ title = "output_" .. i })
         vim.api.nvim_win_close(win, true)
       end
 
@@ -1357,7 +1363,7 @@ describe("termlet", function()
         },
       })
 
-      local buf, win = termlet.create_floating_terminal({ title = "test_meta" })
+      local _buf, win = termlet.create_floating_terminal({ title = "test_meta" })
       vim.api.nvim_win_close(win, true)
 
       vim.wait(100)
@@ -1381,7 +1387,7 @@ describe("termlet", function()
 
       -- Create some outputs
       for i = 1, 2 do
-        local buf, win = termlet.create_floating_terminal({ title = "output_" .. i })
+        local _buf, win = termlet.create_floating_terminal({ title = "output_" .. i })
         vim.api.nvim_win_close(win, true)
       end
 
@@ -1412,7 +1418,7 @@ describe("termlet", function()
       })
 
       -- Verify it fell back to "none" by checking bufhidden is "wipe"
-      local buf, win = termlet.create_floating_terminal({})
+      local buf, _win = termlet.create_floating_terminal({})
       assert.is_not_nil(buf)
       local bufhidden = vim.api.nvim_get_option_value("bufhidden", { buf = buf })
       assert.are.equal("wipe", bufhidden)
@@ -1427,7 +1433,7 @@ describe("termlet", function()
           },
         })
         -- Should not error
-        local buf, win = termlet.create_floating_terminal({})
+        local buf, _win = termlet.create_floating_terminal({})
         assert.is_not_nil(buf)
       end
     end)
@@ -1441,7 +1447,7 @@ describe("termlet", function()
         },
       })
 
-      local buf, win = termlet.create_floating_terminal({ title = "cleanup_test" })
+      local _buf, win = termlet.create_floating_terminal({ title = "cleanup_test" })
       vim.api.nvim_win_close(win, true)
       vim.wait(100)
 
@@ -1664,11 +1670,11 @@ describe("termlet", function()
 
     it("should focus existing terminal", function()
       termlet.setup({ scripts = {} })
-      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      local _buf, _win = termlet.create_floating_terminal({ title = "test" })
 
       -- Create another window to move focus away
       vim.cmd("split")
-      local other_win = vim.api.nvim_get_current_win()
+      local _other_win = vim.api.nvim_get_current_win()
 
       -- Now focus the terminal
       local result = termlet.focus_terminal()
@@ -1679,7 +1685,7 @@ describe("termlet", function()
       termlet.setup({ scripts = {} })
 
       local original_win = vim.api.nvim_get_current_win()
-      local buf, win = termlet.create_floating_terminal({
+      local _buf, win = termlet.create_floating_terminal({
         title = "test",
         original_win = original_win,
       })
@@ -1711,7 +1717,7 @@ describe("termlet", function()
         },
       })
 
-      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      local _buf, win = termlet.create_floating_terminal({ title = "test" })
       assert.is_not_nil(win)
       assert.is_true(vim.api.nvim_win_is_valid(win))
     end)
@@ -1724,7 +1730,7 @@ describe("termlet", function()
         },
       })
 
-      local buf, win = termlet.create_floating_terminal({ title = "test" })
+      local _buf, win = termlet.create_floating_terminal({ title = "test" })
       assert.is_not_nil(win)
       assert.is_true(vim.api.nvim_win_is_valid(win))
     end)
@@ -1750,12 +1756,12 @@ describe("termlet", function()
       it("should keep focus in terminal when focus='terminal'", function()
         termlet.setup({
           scripts = {
-            { name = "test", filename = test_script_path }
+            { name = "test", filename = test_script_path },
           },
           terminal = {
             focus = "terminal",
             auto_insert = false,
-          }
+          },
         })
 
         local original_win = vim.api.nvim_get_current_win()
@@ -1772,11 +1778,11 @@ describe("termlet", function()
       it("should return to previous window when focus='previous'", function()
         termlet.setup({
           scripts = {
-            { name = "test", filename = test_script_path }
+            { name = "test", filename = test_script_path },
           },
           terminal = {
             focus = "previous",
-          }
+          },
         })
 
         local original_win = vim.api.nvim_get_current_win()
@@ -1793,12 +1799,12 @@ describe("termlet", function()
       it("should enter insert mode when auto_insert=true and focus='terminal'", function()
         termlet.setup({
           scripts = {
-            { name = "test", filename = test_script_path }
+            { name = "test", filename = test_script_path },
           },
           terminal = {
             focus = "terminal",
             auto_insert = true,
-          }
+          },
         })
 
         local original_win = vim.api.nvim_get_current_win()

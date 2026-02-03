@@ -61,9 +61,11 @@ function M.setup(user_config)
   -- Validate style config value
   if not valid_styles[config.style] then
     vim.notify(
-      "[TermLet] Invalid highlight style '" .. tostring(config.style)
+      "[TermLet] Invalid highlight style '"
+        .. tostring(config.style)
         .. "', falling back to 'underline'. Valid values: underline, color, both, none",
-      vim.log.levels.WARN)
+      vim.log.levels.WARN
+    )
     config.style = "underline"
   end
 
@@ -104,7 +106,7 @@ function M.highlight_file_path(bufnr, line_num, start_col, end_col)
   }
 
   -- Set the extmark (0-indexed line number for the API)
-  local ok, err = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, line_num - 1, start_col, extmark_opts)
+  local ok, _err = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, line_num - 1, start_col, extmark_opts)
   if not ok then
     -- Silently ignore errors (e.g., buffer was deleted)
     return

@@ -65,8 +65,8 @@ describe("termlet.stacktrace", function()
     it("should reject parser without name", function()
       local parser = {
         patterns = {
-          { pattern = "test", path_group = 1, line_group = 2 }
-        }
+          { pattern = "test", path_group = 1, line_group = 2 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -77,8 +77,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "",
         patterns = {
-          { pattern = "test", path_group = 1, line_group = 2 }
-        }
+          { pattern = "test", path_group = 1, line_group = 2 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -97,7 +97,7 @@ describe("termlet.stacktrace", function()
     it("should reject parser with empty patterns array", function()
       local parser = {
         name = "test",
-        patterns = {}
+        patterns = {},
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -108,8 +108,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { path_group = 1, line_group = 2 }
-        }
+          { path_group = 1, line_group = 2 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -120,8 +120,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "test[", path_group = 1, line_group = 2 }
-        }
+          { pattern = "test[", path_group = 1, line_group = 2 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -132,8 +132,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "test", line_group = 2 }
-        }
+          { pattern = "test", line_group = 2 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -144,8 +144,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "test", path_group = 1 }
-        }
+          { pattern = "test", path_group = 1 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_false(ok)
@@ -156,8 +156,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       local ok, err = stacktrace.register_parser(parser)
       assert.is_true(ok)
@@ -169,10 +169,10 @@ describe("termlet.stacktrace", function()
         name = "test",
         description = "Test parser",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
-      local ok, err = stacktrace.register_parser(parser)
+      local ok, _err = stacktrace.register_parser(parser)
       assert.is_true(ok)
     end)
 
@@ -180,10 +180,10 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+):(%d+)", path_group = 1, line_group = 2, column_group = 3 }
-        }
+          { pattern = "([^:]+):(%d+):(%d+)", path_group = 1, line_group = 2, column_group = 3 },
+        },
       }
-      local ok, err = stacktrace.register_parser(parser)
+      local ok, _err = stacktrace.register_parser(parser)
       assert.is_true(ok)
     end)
 
@@ -191,11 +191,13 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
         },
-        resolve_path = function(path, cwd) return path end
+        resolve_path = function(path, _cwd)
+          return path
+        end,
       }
-      local ok, err = stacktrace.register_parser(parser)
+      local ok, _err = stacktrace.register_parser(parser)
       assert.is_true(ok)
     end)
 
@@ -203,11 +205,13 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
         },
-        is_context_match = function(lines, index) return true end
+        is_context_match = function(_lines, _index)
+          return true
+        end,
       }
-      local ok, err = stacktrace.register_parser(parser)
+      local ok, _err = stacktrace.register_parser(parser)
       assert.is_true(ok)
     end)
 
@@ -215,17 +219,17 @@ describe("termlet.stacktrace", function()
       local parser1 = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       local parser2 = {
         name = "test",
         patterns = {
-          { pattern = "other", path_group = 1, line_group = 2 }
-        }
+          { pattern = "other", path_group = 1, line_group = 2 },
+        },
       }
 
-      local ok1, err1 = stacktrace.register_parser(parser1)
+      local ok1, _err1 = stacktrace.register_parser(parser1)
       assert.is_true(ok1)
 
       local ok2, err2 = stacktrace.register_parser(parser2)
@@ -239,8 +243,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "myparser",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       local ok = stacktrace.register_parser(parser)
       assert.is_true(ok)
@@ -254,8 +258,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "myparser",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -275,14 +279,14 @@ describe("termlet.stacktrace", function()
       local parser1 = {
         name = "parser1",
         patterns = {
-          { pattern = "test1", path_group = 1, line_group = 2 }
-        }
+          { pattern = "test1", path_group = 1, line_group = 2 },
+        },
       }
       local parser2 = {
         name = "parser2",
         patterns = {
-          { pattern = "test2", path_group = 1, line_group = 2 }
-        }
+          { pattern = "test2", path_group = 1, line_group = 2 },
+        },
       }
 
       stacktrace.register_parser(parser1)
@@ -296,8 +300,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "test", path_group = 1, line_group = 2 }
-        }
+          { pattern = "test", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -313,8 +317,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "simple",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -330,8 +334,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "with_col",
         patterns = {
-          { pattern = "([^:]+):(%d+):(%d+)", path_group = 1, line_group = 2, column_group = 3 }
-        }
+          { pattern = "([^:]+):(%d+):(%d+)", path_group = 1, line_group = 2, column_group = 3 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -345,8 +349,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -360,7 +364,7 @@ describe("termlet.stacktrace", function()
         patterns = {
           { pattern = "Format1:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 },
           { pattern = "Format2%s+([^:]+)%s+(%d+)", path_group = 1, line_group = 2 },
-        }
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -377,11 +381,11 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "custom_resolve",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
         },
-        resolve_path = function(path, cwd)
+        resolve_path = function(path, _cwd)
           return "/resolved/" .. path
-        end
+        end,
       }
       stacktrace.register_parser(parser)
 
@@ -396,8 +400,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -431,7 +435,7 @@ describe("termlet.stacktrace", function()
   describe("setup and configuration", function()
     it("should load built-in parsers from config", function()
       stacktrace.setup({
-        languages = { "python" }
+        languages = { "python" },
       })
 
       local parser = stacktrace.get_parser("python")
@@ -441,7 +445,7 @@ describe("termlet.stacktrace", function()
 
     it("should load multiple built-in parsers", function()
       stacktrace.setup({
-        languages = { "python", "csharp" }
+        languages = { "python", "csharp" },
       })
 
       local python = stacktrace.get_parser("python")
@@ -454,12 +458,12 @@ describe("termlet.stacktrace", function()
       local custom_parser = {
         name = "custom",
         patterns = {
-          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
 
       stacktrace.setup({
-        custom_parsers = { custom_parser }
+        custom_parsers = { custom_parser },
       })
 
       local parser = stacktrace.get_parser("custom")
@@ -470,7 +474,7 @@ describe("termlet.stacktrace", function()
     it("should warn on invalid built-in parser", function()
       -- Should not error, just warn
       stacktrace.setup({
-        languages = { "nonexistent_language" }
+        languages = { "nonexistent_language" },
       })
     end)
 
@@ -482,14 +486,14 @@ describe("termlet.stacktrace", function()
 
       -- Should not error, just warn
       stacktrace.setup({
-        custom_parsers = { invalid_parser }
+        custom_parsers = { invalid_parser },
       })
     end)
 
     it("should return config via get_config", function()
       local config = {
         enabled = true,
-        languages = { "python" }
+        languages = { "python" },
       }
       stacktrace.setup(config)
 
@@ -578,7 +582,7 @@ describe("termlet.stacktrace", function()
     end)
 
     it("should parse MSBuild error format with path containing forward slash", function()
-      local line = 'BV/APITest.cs(1887,62): error CS1503: Argument 1: cannot convert from'
+      local line = "BV/APITest.cs(1887,62): error CS1503: Argument 1: cannot convert from"
       local result = stacktrace.parse_line(line)
 
       assert.is_not_nil(result)
@@ -588,7 +592,7 @@ describe("termlet.stacktrace", function()
     end)
 
     it("should parse MSBuild error format with absolute Windows path", function()
-      local line = 'C:\\Projects\\MyApp\\Program.cs(10,5): warning CS0168: The variable'
+      local line = "C:\\Projects\\MyApp\\Program.cs(10,5): warning CS0168: The variable"
       local result = stacktrace.parse_line(line)
 
       assert.is_not_nil(result)
@@ -598,7 +602,7 @@ describe("termlet.stacktrace", function()
     end)
 
     it("should parse MSBuild error format without column number", function()
-      local line = 'src/Utils.cs(123): error CS0246: The type or namespace'
+      local line = "src/Utils.cs(123): error CS0246: The type or namespace"
       local result = stacktrace.parse_line(line)
 
       assert.is_not_nil(result)
@@ -617,7 +621,7 @@ describe("termlet.stacktrace", function()
     end)
 
     it("should parse MSBuild error with path containing spaces", function()
-      local line = 'My Project/My File.cs(10,5): error CS1234: The type or namespace'
+      local line = "My Project/My File.cs(10,5): error CS1234: The type or namespace"
       local result = stacktrace.parse_line(line)
 
       assert.is_not_nil(result)
@@ -630,7 +634,7 @@ describe("termlet.stacktrace", function()
       -- Test that the pattern correctly matches Windows backslash paths
       -- In real terminal output, this would be: C:\Users\Dev\Project\File.cs(42,15): error
       -- In Lua string literals, we need to escape backslashes, so \\ represents one backslash
-      local line = 'C:\\Users\\Dev\\Project\\File.cs(42,15): error CS1234: Error message'
+      local line = "C:\\Users\\Dev\\Project\\File.cs(42,15): error CS1234: Error message"
       local result = stacktrace.parse_line(line)
 
       assert.is_not_nil(result)
@@ -703,14 +707,14 @@ describe("termlet.stacktrace", function()
   describe("setup idempotency", function()
     it("should allow calling setup() twice without errors", function()
       stacktrace.setup({
-        languages = { "python" }
+        languages = { "python" },
       })
       local python1 = stacktrace.get_parser("python")
       assert.is_not_nil(python1)
 
       -- Second call should not fail
       stacktrace.setup({
-        languages = { "python", "csharp" }
+        languages = { "python", "csharp" },
       })
       local python2 = stacktrace.get_parser("python")
       local csharp = stacktrace.get_parser("csharp")
@@ -720,14 +724,14 @@ describe("termlet.stacktrace", function()
 
     it("should replace parsers when setup() called with different config", function()
       stacktrace.setup({
-        languages = { "python", "csharp" }
+        languages = { "python", "csharp" },
       })
       assert.is_not_nil(stacktrace.get_parser("python"))
       assert.is_not_nil(stacktrace.get_parser("csharp"))
 
       -- Second setup with only python
       stacktrace.setup({
-        languages = { "python" }
+        languages = { "python" },
       })
       assert.is_not_nil(stacktrace.get_parser("python"))
       assert.is_nil(stacktrace.get_parser("csharp"))
@@ -739,14 +743,14 @@ describe("termlet.stacktrace", function()
       local custom_parser = {
         name = "custom_at",
         patterns = {
-          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 },
         },
         custom = true,
       }
       local builtin_parser = {
         name = "builtin_at",
         patterns = {
-          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "%s+at%s+([^:]+):(%d+)", path_group = 1, line_group = 2 },
         },
       }
 
@@ -762,15 +766,15 @@ describe("termlet.stacktrace", function()
     it("should return parsers in insertion order via get_all_parsers", function()
       local parser_a = {
         name = "aaa",
-        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } },
       }
       local parser_b = {
         name = "bbb",
-        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } },
       }
       local parser_c = {
         name = "ccc",
-        patterns = { { pattern = "test", path_group = 1, line_group = 2 } }
+        patterns = { { pattern = "test", path_group = 1, line_group = 2 } },
       }
 
       stacktrace.register_parser(parser_a)
@@ -790,8 +794,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "optional_col",
         patterns = {
-          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 }
-        }
+          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -807,8 +811,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "optional_col2",
         patterns = {
-          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 }
-        }
+          { pattern = "([^:]+):(%d+):?(%d*)", path_group = 1, line_group = 2, column_group = 3 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -823,8 +827,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -836,8 +840,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -849,8 +853,8 @@ describe("termlet.stacktrace", function()
       local parser = {
         name = "test",
         patterns = {
-          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
       stacktrace.register_parser(parser)
 
@@ -865,7 +869,7 @@ describe("termlet.stacktrace", function()
       local parser_csharp_like = {
         name = "csharp_like",
         patterns = {
-          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 },
         },
         is_context_match = function(lines, index)
           for i = math.max(1, index - 3), math.min(#lines, index + 3) do
@@ -879,7 +883,7 @@ describe("termlet.stacktrace", function()
       local parser_java_like = {
         name = "java_like",
         patterns = {
-          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 }
+          { pattern = "%s+at%s+(.+):(%d+)", path_group = 1, line_group = 2 },
         },
         is_context_match = function(lines, index)
           for i = math.max(1, index - 3), math.min(#lines, index + 3) do
@@ -920,12 +924,12 @@ describe("termlet.stacktrace", function()
       local my_parser = {
         name = "user_parser",
         patterns = {
-          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 }
-        }
+          { pattern = "CUSTOM:%s+([^:]+):(%d+)", path_group = 1, line_group = 2 },
+        },
       }
 
       stacktrace.setup({
-        custom_parsers = { my_parser }
+        custom_parsers = { my_parser },
       })
 
       -- The original table should NOT have been mutated
@@ -1109,9 +1113,9 @@ describe("termlet.stacktrace", function()
       local lines = {
         "Traceback (most recent call last):",
         '  File "/home/user/app.py", line 25, in main',
-        '    result = process(data)',
+        "    result = process(data)",
         '  File "/home/user/utils.py", line 42, in process',
-        '    return transform(data)',
+        "    return transform(data)",
         "TypeError: cannot transform NoneType",
       }
 
@@ -1270,7 +1274,7 @@ describe("termlet.stacktrace", function()
     end)
 
     it("should strip basic CSI escape sequences", function()
-      local input = "\27[0m  File \"/home/user/test.py\", line 7, in <module>\27[0m"
+      local input = '\27[0m  File "/home/user/test.py", line 7, in <module>\27[0m'
       local result = stacktrace.strip_ansi(input)
       assert.equals('  File "/home/user/test.py", line 7, in <module>', result)
     end)
@@ -1337,8 +1341,8 @@ describe("termlet.stacktrace", function()
         scripts = {},
         stacktrace = {
           enabled = true,
-          languages = { "python" }
-        }
+          languages = { "python" },
+        },
       })
 
       local parser = termlet.stacktrace.get_parser("python")
@@ -1351,8 +1355,8 @@ describe("termlet.stacktrace", function()
         stacktrace = {
           enabled = true,
           -- Empty languages array should load all parsers (including csharp)
-          languages = {}
-        }
+          languages = {},
+        },
       })
 
       -- Create a buffer with MSBuild error output
@@ -1360,7 +1364,7 @@ describe("termlet.stacktrace", function()
       local lines = {
         "Building project...",
         "CCSO/engines/bv/Engine.cs(20,19): error CS1061: 'BVEngine' does not contain a definition for 'Run2'",
-        "Build failed."
+        "Build failed.",
       }
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
@@ -1390,8 +1394,8 @@ describe("termlet.stacktrace", function()
         scripts = {},
         stacktrace = {
           enabled = true,
-          languages = {} -- Should load all parsers
-        }
+          languages = {}, -- Should load all parsers
+        },
       })
 
       -- Verify that csharp parser is loaded

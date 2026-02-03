@@ -386,7 +386,7 @@ describe("termlet.keybindings", function()
   end)
 
   describe("on_save callback", function()
-    it("should call callback when keybinding is set", function()
+    it("should call callback when keybinding is applied via UI flow", function()
       local callback_called = false
       local callback_keybindings = nil
 
@@ -395,11 +395,26 @@ describe("termlet.keybindings", function()
         callback_keybindings = new_keybindings
       end)
 
+      -- _apply_captured_keybinding triggers the on_save_callback (UI flow)
+      keybindings._apply_captured_keybinding("<leader>b")
+
+      assert.is_true(callback_called)
+      assert.is_not_nil(callback_keybindings)
+      assert.equals("<leader>b", callback_keybindings["build"])
+    end)
+
+    it("should not call callback when using set_keybinding API", function()
+      local callback_called = false
+
+      keybindings.open(test_scripts, function()
+        callback_called = true
+      end)
+
+      -- set_keybinding is the programmatic API and does not invoke the callback
       keybindings.set_keybinding("build", "<leader>b")
 
-      -- Note: The callback is called from set_keybinding via the on_save_callback
-      -- But set_keybinding bypasses the UI callback flow, so we need to check
-      -- the internal save was successful
+      assert.is_false(callback_called)
+
       local bindings = keybindings.get_keybindings()
       assert.equals("<leader>b", bindings["build"])
     end)

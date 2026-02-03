@@ -138,20 +138,11 @@ local function format_execution_time(seconds)
   end
 end
 
---- Format a timestamp in human-readable format
----@param timestamp number Unix timestamp
----@return string Formatted timestamp
-local function format_timestamp(timestamp)
-  return os.date("%Y-%m-%d %H:%M:%S", timestamp)
-end
-
 --- Format a history entry for display
 ---@param entry table History entry
----@param index number Index in the list
 ---@param is_selected boolean Whether this entry is selected
----@param width number Available width for the line
 ---@return string Formatted line
-local function format_history_line(entry, index, is_selected, width)
+local function format_history_line(entry, is_selected)
   local prefix = is_selected and "  > " or "    "
 
   -- Status icon
@@ -175,29 +166,10 @@ local function format_history_line(entry, index, is_selected, width)
   local exit_str = string.format("exit:%d", entry.exit_code or -1)
 
   -- Build the line
-  local line = string.format("%s%s  %-25s  %8s  %8s  %s",
-    prefix, status_icon, display_name, exec_time, exit_str, time_str)
+  local line =
+    string.format("%s%s  %-25s  %8s  %8s  %s", prefix, status_icon, display_name, exec_time, exit_str, time_str)
 
   return line
-end
-
---- Get the help text lines
----@return table List of help text lines
-local function get_help_lines()
-  return {
-    "",
-    "  Keybindings:",
-    "  ────────────────────────────────",
-    "  j / ↓        Move down",
-    "  k / ↑        Move up",
-    "  Enter        Re-run selected script",
-    "  c            Clear history",
-    "  Escape       Close history",
-    "  q            Close history",
-    "  gg           Go to first entry",
-    "  G            Go to last entry",
-    "",
-  }
 end
 
 --- Render the history UI
@@ -217,8 +189,7 @@ local function render_history()
 
   -- Add header
   table.insert(lines, "")
-  local header = string.format("  %s  %-25s  %8s  %8s  %s",
-    " ", "Script", "Duration", "Exit", "Time")
+  local header = string.format("  %s  %-25s  %8s  %8s  %s", " ", "Script", "Duration", "Exit", "Time")
   table.insert(lines, header)
   table.insert(lines, "  " .. string.rep("─", width - 4))
 
@@ -231,7 +202,7 @@ local function render_history()
     local selected_index = state.selected_index or 1
     for i, entry in ipairs(state.entries) do
       local is_selected = (i == selected_index)
-      local line = format_history_line(entry, i, is_selected, width)
+      local line = format_history_line(entry, is_selected)
       table.insert(lines, line)
 
       if is_selected then
@@ -244,14 +215,14 @@ local function render_history()
           line = #lines - 1,
           col_start = 4,
           col_end = 7,
-          group = state.config.highlight.success
+          group = state.config.highlight.success,
         })
       else
         table.insert(highlights, {
           line = #lines - 1,
           col_start = 4,
           col_end = 7,
-          group = state.config.highlight.error
+          group = state.config.highlight.error,
         })
       end
     end

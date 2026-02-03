@@ -77,13 +77,16 @@ local M = {
     -- Look for Java-specific indicators
     for i = math.max(1, index - 3), math.min(#lines, index + 3) do
       local line = lines[i]
-      if line and (
-        line:match("Exception:") or
-        line:match("Exception in thread") or
-        line:match("%s+at%s+") or
-        line:match("%.java:") or
-        line:match("Caused by:")
-      ) then
+      if
+        line
+        and (
+          line:match("Exception:")
+          or line:match("Exception in thread")
+          or line:match("%s+at%s+")
+          or line:match("%.java:")
+          or line:match("Caused by:")
+        )
+      then
         return true
       end
     end

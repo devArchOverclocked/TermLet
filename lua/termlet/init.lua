@@ -27,8 +27,8 @@ local config = {
   root_dir = nil, -- Global root directory for script searching
   terminal = {
     height_ratio = 0.16, -- 1/6 of screen height
-    width_ratio = 1.0,   -- full width
-    border = "rounded",  -- string preset or table of 8 border characters
+    width_ratio = 1.0, -- full width
+    border = "rounded", -- string preset or table of 8 border characters
     position = "bottom", -- "bottom", "center", "top"
     highlights = {
       border = "FloatBorder",
@@ -45,14 +45,14 @@ local config = {
       error = "✗",
     },
     output_persistence = "none", -- "none" | "buffer"
-    max_saved_buffers = 5,       -- Maximum number of hidden buffers to keep
-    focus = "previous",          -- "terminal" | "previous" | "none" - where to place focus after opening terminal
-    auto_insert = false,         -- Auto-enter insert mode when focus="terminal"
+    max_saved_buffers = 5, -- Maximum number of hidden buffers to keep
+    focus = "previous", -- "terminal" | "previous" | "none" - where to place focus after opening terminal
+    auto_insert = false, -- Auto-enter insert mode when focus="terminal"
     filters = {
-      enabled = false,           -- Enable output filtering
-      show_only = {},            -- Only show lines matching these patterns
-      hide = {},                 -- Hide lines matching these patterns
-      highlight = {},            -- Custom highlighting rules: { pattern = "ERROR", color = "#ff0000" }
+      enabled = false, -- Enable output filtering
+      show_only = {}, -- Only show lines matching these patterns
+      hide = {}, -- Hide lines matching these patterns
+      highlight = {}, -- Custom highlighting rules: { pattern = "ERROR", color = "#ff0000" }
     },
   },
   search = {
@@ -85,20 +85,20 @@ local config = {
     title = " TermLet Scripts ",
   },
   stacktrace = {
-    enabled = true,           -- Enable stack trace detection
-    languages = {},           -- Languages to detect (empty = all)
-    custom_parsers = {},      -- Custom parser definitions
+    enabled = true, -- Enable stack trace detection
+    languages = {}, -- Languages to detect (empty = all)
+    custom_parsers = {}, -- Custom parser definitions
     parser_order = { "custom", "builtin" }, -- Parser priority
-    buffer_size = 50,         -- Lines to keep in buffer for multi-line detection
+    buffer_size = 50, -- Lines to keep in buffer for multi-line detection
     highlight = {
-      enabled = true,         -- Enable visual highlighting of file paths
-      style = "underline",    -- "underline", "color", "both", "none"
+      enabled = true, -- Enable visual highlighting of file paths
+      style = "underline", -- "underline", "color", "both", "none"
       hl_group = "TermLetStackTracePath", -- Custom highlight group
     },
   },
   history = {
-    enabled = true,           -- Enable execution history tracking
-    max_entries = 50,         -- Maximum number of history entries to keep
+    enabled = true, -- Enable execution history tracking
+    max_entries = 50, -- Maximum number of history entries to keep
   },
   debug = false,
 }
@@ -165,8 +165,7 @@ local function update_terminal_status(win, exit_code)
     return false
   end
   local status = exit_code == 0 and "success" or "error"
-  local new_title = format_terminal_title(
-    term_data.term_config, term_data.name, status)
+  local new_title = format_terminal_title(term_data.term_config, term_data.name, status)
   vim.api.nvim_win_set_config(win, { title = new_title })
   return true
 end
@@ -252,27 +251,34 @@ end
 -- Apply winhighlight groups to a window
 local function apply_win_highlights(win, highlights)
   if highlights then
-    vim.api.nvim_set_option_value("winhighlight",
-      "Normal:" .. (highlights.background or "NormalFloat") ..
-      ",FloatBorder:" .. (highlights.border or "FloatBorder") ..
-      ",FloatTitle:" .. (highlights.title or "Title"),
-      { win = win })
+    vim.api.nvim_set_option_value(
+      "winhighlight",
+      "Normal:"
+        .. (highlights.background or "NormalFloat")
+        .. ",FloatBorder:"
+        .. (highlights.border or "FloatBorder")
+        .. ",FloatTitle:"
+        .. (highlights.title or "Title"),
+      { win = win }
+    )
   end
 end
 
 -- Improved terminal window creation with better error handling
 function M.create_floating_terminal(opts)
   opts = opts or {}
-  
+
   local term_config = vim.tbl_deep_extend("force", config.terminal, opts)
 
   -- Validate title_pos
   local valid_title_pos = { left = true, center = true, right = true }
   if term_config.title_pos and not valid_title_pos[term_config.title_pos] then
     vim.notify(
-      "[TermLet] Invalid title_pos '" .. tostring(term_config.title_pos)
+      "[TermLet] Invalid title_pos '"
+        .. tostring(term_config.title_pos)
         .. "', falling back to 'center'. Valid values: left, center, right",
-      vim.log.levels.WARN)
+      vim.log.levels.WARN
+    )
     term_config.title_pos = "center"
   end
 
@@ -280,8 +286,10 @@ function M.create_floating_terminal(opts)
   if type(term_config.border) == "table" and #term_config.border ~= 8 then
     vim.notify(
       "[TermLet] Custom border table must have exactly 8 characters, got "
-        .. #term_config.border .. ". Falling back to 'rounded'.",
-      vim.log.levels.WARN)
+        .. #term_config.border
+        .. ". Falling back to 'rounded'.",
+      vim.log.levels.WARN
+    )
     term_config.border = "rounded"
   end
 
@@ -324,7 +332,6 @@ function M.create_floating_terminal(opts)
     term_config = term_config,
     original_win = opts.original_win, -- Track original window if provided
   }
-
 
   -- Auto-cleanup on window close
   vim.api.nvim_create_autocmd("WinClosed", {
@@ -409,10 +416,18 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   debug_log("Starting search from root: " .. search_root)
 
   -- Default search directories if none specified
-  search_dirs = search_dirs or {
-    "scripts", "bin", "tools", "build", ".scripts",
-    "dev", "development", "utils", "automation"
-  }
+  search_dirs = search_dirs
+    or {
+      "scripts",
+      "bin",
+      "tools",
+      "build",
+      ".scripts",
+      "dev",
+      "development",
+      "utils",
+      "automation",
+    }
 
   -- Get maximum search depth from config
   local max_search_depth = config.search.max_depth or 5
@@ -420,7 +435,9 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
   -- Function to recursively search for file in a directory
   local function search_in_dir(dir_path, target_file, max_depth)
     max_depth = max_depth or max_search_depth
-    if max_depth <= 0 then return nil end
+    if max_depth <= 0 then
+      return nil
+    end
 
     -- Check if the target file itself is excluded by patterns
     if should_exclude_file(target_file, config.search) then
@@ -439,7 +456,9 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
     if handle then
       while true do
         local name, type = vim.loop.fs_scandir_next(handle)
-        if not name then break end
+        if not name then
+          break
+        end
 
         if type == "directory" then
           if should_exclude_dir(name, config.search) then
@@ -447,7 +466,9 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
           else
             local sub_path = dir_path .. "/" .. name
             local result = search_in_dir(sub_path, target_file, max_depth - 1)
-            if result then return result end
+            if result then
+              return result
+            end
           end
         elseif type == "file" and should_exclude_file(name, config.search) then
           debug_log("Skipping excluded file: " .. dir_path .. "/" .. name)
@@ -480,14 +501,18 @@ function M.find_script_by_name(filename, root_dir, search_dirs)
     if vim.fn.isdirectory(search_path) == 1 then
       debug_log("Searching in directory: " .. search_path)
       local result = search_in_dir(search_path, basename, max_search_depth)
-      if result then return result end
+      if result then
+        return result
+      end
     end
   end
 
   -- Finally, do a recursive search from root (as fallback)
   debug_log("Doing recursive search from root: " .. search_root)
   local result = search_in_dir(search_root, basename, max_search_depth)
-  if result then return result end
+  if result then
+    return result
+  end
 
   debug_log("Script '" .. filename .. "' not found in root directory: " .. search_root)
   return nil
@@ -499,27 +524,27 @@ function M.find_script(dir_name, relative_path)
     debug_log("Missing dir_name or relative_path")
     return nil
   end
-  
+
   local current_file = vim.fn.expand("%:p")
   if current_file == "" then
     debug_log("No current file")
     return nil
   end
-  
+
   local path = vim.fn.fnamemodify(current_file, ":h")
   debug_log("Starting search from: " .. path)
-  
+
   local max_depth = 20
   local depth = 0
-  
+
   while path ~= "/" and depth < max_depth do
     local folder = vim.fn.fnamemodify(path, ":t")
     debug_log("Checking: " .. path .. " (dir: " .. folder .. ")")
-    
+
     if folder == dir_name then
       local script_path = path .. "/" .. relative_path
       debug_log("Found target folder. Looking for script at: " .. script_path)
-      
+
       if vim.fn.filereadable(script_path) == 1 then
         debug_log("Script found at: " .. script_path)
         return script_path
@@ -527,11 +552,11 @@ function M.find_script(dir_name, relative_path)
         debug_log("Script not found at: " .. script_path)
       end
     end
-    
+
     path = vim.fn.fnamemodify(path, ":h")
     depth = depth + 1
   end
-  
+
   debug_log("Directory named '" .. dir_name .. "' not found after " .. depth .. " iterations")
   return nil
 end
@@ -551,12 +576,19 @@ local function execute_script(script)
     -- Legacy method: find by directory name and relative path
     full_path = M.find_script(script.dir_name, script.relative_path)
   else
-    vim.notify("Script '" .. script.name .. "' must specify either 'filename' (with optional 'root_dir') or both 'dir_name' and 'relative_path'", vim.log.levels.ERROR)
+    vim.notify(
+      "Script '"
+        .. script.name
+        .. "' must specify either 'filename' (with optional 'root_dir') or both 'dir_name' and 'relative_path'",
+      vim.log.levels.ERROR
+    )
     return false
   end
 
   if not full_path then
-    local search_info = script.filename and ("filename: " .. script.filename .. (script.root_dir and (", root: " .. script.root_dir) or "")) or ("dir: " .. script.dir_name .. ", path: " .. script.relative_path)
+    local search_info = script.filename
+        and ("filename: " .. script.filename .. (script.root_dir and (", root: " .. script.root_dir) or ""))
+      or ("dir: " .. script.dir_name .. ", path: " .. script.relative_path)
     vim.notify("Script '" .. script.name .. "' not found (" .. search_info .. ")", vim.log.levels.ERROR)
     return false
   end
@@ -741,12 +773,13 @@ function M.setup(user_config)
 
   -- Validate output_persistence config value
   local valid_persistence = { none = true, buffer = true }
-  if config.terminal.output_persistence
-      and not valid_persistence[config.terminal.output_persistence] then
+  if config.terminal.output_persistence and not valid_persistence[config.terminal.output_persistence] then
     vim.notify(
-      "[TermLet] Invalid output_persistence '" .. tostring(config.terminal.output_persistence)
+      "[TermLet] Invalid output_persistence '"
+        .. tostring(config.terminal.output_persistence)
         .. "', falling back to 'none'. Valid values: none, buffer",
-      vim.log.levels.WARN)
+      vim.log.levels.WARN
+    )
     config.terminal.output_persistence = "none"
   end
 
@@ -795,7 +828,12 @@ function M.setup(user_config)
     local has_legacy = script.dir_name and script.relative_path
 
     if not has_filename and not has_legacy then
-      vim.notify("Script '" .. script.name .. "' must specify either 'filename' (with optional 'root_dir') or both 'dir_name' and 'relative_path'", vim.log.levels.WARN)
+      vim.notify(
+        "Script '"
+          .. script.name
+          .. "' must specify either 'filename' (with optional 'root_dir') or both 'dir_name' and 'relative_path'",
+        vim.log.levels.WARN
+      )
       goto continue
     end
 
@@ -838,13 +876,13 @@ end
 -- Improved close function with better target detection
 function M.close_terminal()
   local current_win = vim.api.nvim_get_current_win()
-  
+
   -- Check if current window is a terminal
   if active_terminals[current_win] then
     vim.api.nvim_win_close(current_win, true)
     return true
   end
-  
+
   -- Find and close the most recently created terminal
   local wins = vim.tbl_keys(active_terminals)
   if #wins > 0 then
@@ -854,7 +892,7 @@ function M.close_terminal()
       return true
     end
   end
-  
+
   vim.notify("No active terminals to close", vim.log.levels.INFO)
   return false
 end
@@ -865,7 +903,7 @@ function M.list_scripts()
     vim.notify("No scripts configured", vim.log.levels.INFO)
     return
   end
-  
+
   local script_list = {}
   for _, script in ipairs(config.scripts) do
     local location_info
@@ -877,7 +915,7 @@ function M.list_scripts()
     end
     table.insert(script_list, script.name .. " (" .. location_info .. ")")
   end
-  
+
   vim.notify("Available scripts:\n" .. table.concat(script_list, "\n"), vim.log.levels.INFO)
 end
 
@@ -1034,12 +1072,15 @@ function M.show_last_output()
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = saved_entry.buf })
 
   -- Add q keymap to close the output viewer window
-  vim.api.nvim_buf_set_keymap(saved_entry.buf, "n", "q", "",
-    { noremap = true, silent = true, callback = function()
+  vim.api.nvim_buf_set_keymap(saved_entry.buf, "n", "q", "", {
+    noremap = true,
+    silent = true,
+    callback = function()
       if vim.api.nvim_win_is_valid(win) then
         vim.api.nvim_win_close(win, true)
       end
-    end })
+    end,
+  })
 
   return true, win
 end
@@ -1079,8 +1120,10 @@ function M.list_outputs()
   -- Format and display the list
   local output_list = {}
   for idx, output in ipairs(valid_outputs) do
-    table.insert(output_list,
-      idx .. ". " .. output.name .. " - " .. output.timestamp .. " (" .. output.lines .. " lines)")
+    table.insert(
+      output_list,
+      idx .. ". " .. output.name .. " - " .. output.timestamp .. " (" .. output.lines .. " lines)"
+    )
   end
 
   vim.notify("Saved terminal outputs:\n" .. table.concat(output_list, "\n"), vim.log.levels.INFO)
@@ -1120,7 +1163,7 @@ function M.open_keybindings()
     return false
   end
 
-  return keybindings.open(config.scripts, function(new_keybindings)
+  return keybindings.open(config.scripts, function(_new_keybindings)
     -- Re-apply keybindings when saved
     apply_keybindings()
   end, config.keybindings)

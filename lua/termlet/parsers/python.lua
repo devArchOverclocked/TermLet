@@ -51,12 +51,10 @@ local M = {
     -- Look for Python-specific indicators in surrounding lines
     for i = math.max(1, index - 3), math.min(#lines, index + 3) do
       local line = lines[i]
-      if line and (
-        line:match("Traceback") or
-        line:match("File.*%.py") or
-        line:match("Error:") or
-        line:match("Exception:")
-      ) then
+      if
+        line
+        and (line:match("Traceback") or line:match("File.*%.py") or line:match("Error:") or line:match("Exception:"))
+      then
         return true
       end
     end

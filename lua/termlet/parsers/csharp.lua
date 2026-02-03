@@ -57,12 +57,10 @@ local M = {
     -- Look for C#-specific indicators in surrounding lines
     for i = math.max(1, index - 3), math.min(#lines, index + 3) do
       local line = lines[i]
-      if line and (
-        line:match("Exception:") or
-        line:match("%s+at%s+") or
-        line:match("%.cs%(") or
-        line:match(":line%s+%d+")
-      ) then
+      if
+        line
+        and (line:match("Exception:") or line:match("%s+at%s+") or line:match("%.cs%(") or line:match(":line%s+%d+"))
+      then
         return true
       end
     end
