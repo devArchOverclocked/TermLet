@@ -21,6 +21,9 @@ local filter = require("termlet.filter")
 -- Load filter UI module
 local filter_ui = require("termlet.filter_ui")
 
+-- Load export/import module
+local export_import = require("termlet.export_import")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -1491,5 +1494,107 @@ function M.toggle_filter_ui()
   filter_ui.toggle(buf)
   return true
 end
+
+-- ============================================================================
+-- Export/Import API
+-- ============================================================================
+
+--- Export current script configurations to JSON string
+---@param opts table|nil Export options { strip_sensitive = true }
+---@return string|nil json_string
+---@return string|nil error_message
+function M.export_scripts(opts)
+  if not config.scripts or #config.scripts == 0 then
+    vim.notify("No scripts configured to export", vim.log.levels.WARN)
+    return nil, "No scripts configured"
+  end
+
+  return export_import.export_json(config.scripts, opts)
+end
+
+--- Export current script configurations to a file
+--- Prompts for file path if not provided
+---@param filepath string|nil Output file path (prompts if nil)
+---@param opts table|nil Export options { strip_sensitive = true }
+function M.export_to_file(filepath, opts)
+  if not config.scripts or #config.scripts == 0 then
+    vim.notify("No scripts configured to export", vim.log.levels.WARN)
+    return
+  end
+
+  if not filepath or filepath == "" then
+    -- Prompt for file path
+    vim.ui.input({ prompt = "Export to file: ", default = ".termlet.json" }, function(input)
+      if input and input ~= "" then
+        local ok, err = export_import.export_to_file(config.scripts, input, opts)
+        if ok then
+          vim.notify("Exported " .. #config.scripts .. " script(s) to " .. input, vim.log.levels.INFO)
+        else
+          vim.notify("Export failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+        end
+      end
+    end)
+  else
+    local ok, err = export_import.export_to_file(config.scripts, filepath, opts)
+    if ok then
+      vim.notify("Exported " .. #config.scripts .. " script(s) to " .. filepath, vim.log.levels.INFO)
+    else
+      vim.notify("Export failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+    end
+  end
+end
+
+--- Import script configurations from a file with preview
+---@param filepath string|nil Input file path (prompts if nil)
+function M.import_from_file(filepath)
+  if not filepath or filepath == "" then
+    -- Prompt for file path
+    vim.ui.input({ prompt = "Import from file: ", default = ".termlet.json" }, function(input)
+      if input and input ~= "" then
+        M._do_import(input)
+      end
+    end)
+  else
+    M._do_import(filepath)
+  end
+end
+
+--- Internal import handler (separated for testability)
+---@param filepath string File path to import from
+function M._do_import(filepath)
+  local data, err = export_import.import_from_file(filepath)
+  if not data then
+    vim.notify("Import failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+    return
+  end
+
+  -- Open preview UI
+  export_import.open_preview(data, config.scripts or {}, function(import_data, mode)
+    if mode == "replace" then
+      config.scripts = vim.deepcopy(import_data.scripts)
+    else
+      local merged, _changes = export_import.merge_scripts(config.scripts or {}, import_data.scripts)
+      config.scripts = merged
+    end
+
+    -- Re-run setup to apply new scripts
+    M.setup(config)
+    vim.notify("Imported " .. #import_data.scripts .. " script(s) (" .. mode .. " mode)", vim.log.levels.INFO)
+  end, config.export_import)
+end
+
+--- Close the import preview if open
+function M.close_import_preview()
+  export_import.close_preview()
+end
+
+--- Check if import preview is currently open
+---@return boolean
+function M.is_import_preview_open()
+  return export_import.is_preview_open()
+end
+
+--- Export/import module access
+M.export_import = export_import
 
 return M
