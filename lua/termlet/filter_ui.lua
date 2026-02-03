@@ -281,4 +281,21 @@ function M.toggle(target_buf)
   end
 end
 
+--- Get current state (for testing)
+---@return table
+function M.get_state()
+  return {
+    selected_index = ui_state.selected_index,
+    current_preset = ui_state.current_preset,
+    preset_count = #presets,
+  }
+end
+
+--- Programmatically trigger actions (for testing)
+M.actions = {
+  move_up = move_up,
+  move_down = move_down,
+  apply_current_preset = apply_current_preset,
+}
+
 return M

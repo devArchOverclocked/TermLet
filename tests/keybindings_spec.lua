@@ -619,6 +619,93 @@ describe("termlet.keybindings", function()
     end)
   end)
 
+  describe("format_keybinding_line", function()
+    it("should format a line with keybinding set", function()
+      local script = { name = "build", description = "Build project" }
+      local line, regions = keybindings._format_keybinding_line(script, "<leader>b", 1, false, 80)
+
+      assert.is_string(line)
+      assert.is_table(regions)
+      assert.truthy(line:find("build"))
+      assert.truthy(line:find("<leader>b"))
+      assert.truthy(line:find("1%."))
+    end)
+
+    it("should format a line with no keybinding set", function()
+      local script = { name = "test", description = "Run tests" }
+      local line, _ = keybindings._format_keybinding_line(script, nil, 2, false, 80)
+
+      assert.truthy(line:find("test"))
+      assert.truthy(line:find("%(not set%)"))
+      assert.truthy(line:find("2%."))
+    end)
+
+    it("should show pointer for selected entry", function()
+      local script = { name = "deploy", description = "Deploy" }
+      local selected_line = keybindings._format_keybinding_line(script, "<C-d>", 1, true, 80)
+      local unselected_line = keybindings._format_keybinding_line(script, "<C-d>", 1, false, 80)
+
+      -- Selected line starts with " > ", unselected starts with "   "
+      assert.truthy(selected_line:match("^ > "))
+      assert.truthy(unselected_line:match("^   "))
+    end)
+
+    it("should return keybinding highlight region when keybinding is set", function()
+      local script = { name = "build" }
+      local _, regions = keybindings._format_keybinding_line(script, "<leader>b", 1, false, 80)
+
+      assert.is_true(#regions >= 1)
+      assert.equals("keybinding", regions[1].group)
+      assert.is_number(regions[1].col_start)
+      assert.is_number(regions[1].col_end)
+      assert.is_true(regions[1].col_end > regions[1].col_start)
+    end)
+
+    it("should return notset highlight region when keybinding is nil", function()
+      local script = { name = "build" }
+      local _, regions = keybindings._format_keybinding_line(script, nil, 1, false, 80)
+
+      assert.is_true(#regions >= 1)
+      assert.equals("notset", regions[1].group)
+    end)
+
+    it("should return notset highlight region for empty keybinding", function()
+      local script = { name = "build" }
+      local _, regions = keybindings._format_keybinding_line(script, "", 1, false, 80)
+
+      assert.is_true(#regions >= 1)
+      assert.equals("notset", regions[1].group)
+    end)
+
+    it("should truncate long script names", function()
+      local script = { name = "very_long_script_name_that_exceeds_column_width" }
+      local line = keybindings._format_keybinding_line(script, "<leader>x", 1, false, 50)
+
+      assert.is_string(line)
+      -- Name should be truncated to fit column width
+      assert.is_true(#line < 80)
+    end)
+
+    it("should produce consistent byte offsets for highlight regions", function()
+      local script = { name = "build" }
+      local line, regions = keybindings._format_keybinding_line(script, "<leader>b", 1, false, 80)
+
+      for _, region in ipairs(regions) do
+        assert.is_true(region.col_start >= 0, "col_start should be non-negative")
+        assert.is_true(region.col_end <= #line, "col_end should not exceed line byte length")
+        assert.is_true(region.col_end > region.col_start, "col_end should be after col_start")
+      end
+    end)
+
+    it("should handle unnamed script gracefully", function()
+      local script = {}
+      local line = keybindings._format_keybinding_line(script, "<leader>x", 1, false, 80)
+
+      assert.is_string(line)
+      assert.truthy(line:find("unnamed"))
+    end)
+  end)
+
   describe("navigation with empty scripts", function()
     before_each(function()
       keybindings.open({}, nil)

@@ -53,9 +53,13 @@ describe("termlet.filter_ui", function()
       assert.is_false(filter_ui.is_open())
     end)
 
-    it("should use native floating window border", function()
+    it("should initialize state correctly on open", function()
       filter_ui.open(target_buf)
-      assert.is_true(filter_ui.is_open())
+      local state = filter_ui.get_state()
+
+      assert.equals(1, state.selected_index)
+      assert.equals("all", state.current_preset)
+      assert.equals(4, state.preset_count)
     end)
   end)
 
@@ -103,6 +107,73 @@ describe("termlet.filter_ui", function()
 
       filter_ui.toggle(target_buf)
       assert.is_false(filter_ui.is_open())
+    end)
+  end)
+
+  describe("get_state", function()
+    it("should return current state", function()
+      filter_ui.open(target_buf)
+      local state = filter_ui.get_state()
+
+      assert.is_number(state.selected_index)
+      assert.is_string(state.current_preset)
+      assert.is_number(state.preset_count)
+    end)
+
+    it("should reflect default preset as all", function()
+      filter_ui.open(target_buf)
+      local state = filter_ui.get_state()
+      assert.equals("all", state.current_preset)
+    end)
+  end)
+
+  describe("navigation via actions", function()
+    before_each(function()
+      filter_ui.open(target_buf)
+    end)
+
+    it("should move down correctly", function()
+      local state = filter_ui.get_state()
+      assert.equals(1, state.selected_index)
+
+      filter_ui.actions.move_down()
+      state = filter_ui.get_state()
+      assert.equals(2, state.selected_index)
+
+      filter_ui.actions.move_down()
+      state = filter_ui.get_state()
+      assert.equals(3, state.selected_index)
+    end)
+
+    it("should wrap around when moving down past last preset", function()
+      local state = filter_ui.get_state()
+      local count = state.preset_count
+
+      for _ = 1, count do
+        filter_ui.actions.move_down()
+      end
+      state = filter_ui.get_state()
+      assert.equals(1, state.selected_index)
+    end)
+
+    it("should move up correctly", function()
+      filter_ui.actions.move_down()
+      filter_ui.actions.move_down()
+      local state = filter_ui.get_state()
+      assert.equals(3, state.selected_index)
+
+      filter_ui.actions.move_up()
+      state = filter_ui.get_state()
+      assert.equals(2, state.selected_index)
+    end)
+
+    it("should wrap around when moving up past first preset", function()
+      local state = filter_ui.get_state()
+      assert.equals(1, state.selected_index)
+
+      filter_ui.actions.move_up()
+      state = filter_ui.get_state()
+      assert.equals(state.preset_count, state.selected_index)
     end)
   end)
 end)

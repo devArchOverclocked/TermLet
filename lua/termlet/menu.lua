@@ -178,9 +178,10 @@ local function render_menu()
     table.insert(lines, "")
     local search_line = "    / " .. state.search_query .. "█"
     table.insert(lines, search_line)
+    local search_line_idx = #lines - 1
     table.insert(lines, "    " .. string.rep("─", sep_width))
     table.insert(lines, "")
-    table.insert(highlights, { line = 1, group = state.config.highlight.search })
+    table.insert(highlights, { line = search_line_idx, group = state.config.highlight.search })
   else
     table.insert(lines, "")
   end

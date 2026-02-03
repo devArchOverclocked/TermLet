@@ -379,6 +379,157 @@ describe("termlet.history", function()
   end)
 end)
 
+describe("termlet.history format_history_line", function()
+  local history
+
+  before_each(function()
+    package.loaded["termlet.history"] = nil
+    history = require("termlet.history")
+    history.clear_history()
+  end)
+
+  after_each(function()
+    if history.is_open() then
+      history.close()
+    end
+    history.clear_history()
+  end)
+
+  it("should format a successful entry with correct columns", function()
+    local entry = {
+      script_name = "build",
+      exit_code = 0,
+      execution_time = 1.5,
+      timestamp = os.time(),
+    }
+
+    local line, regions = history._format_history_line(entry, 1, false, 80)
+    assert.is_string(line)
+    assert.is_table(regions)
+    -- Should contain the script name
+    assert.truthy(line:find("build"))
+    -- Should contain the number label
+    assert.truthy(line:find("1%."))
+    -- Should contain the success icon
+    assert.truthy(line:find("✓"))
+  end)
+
+  it("should format a failed entry with error icon", function()
+    local entry = {
+      script_name = "test",
+      exit_code = 1,
+      execution_time = 0.5,
+      timestamp = os.time(),
+    }
+
+    local line, _ = history._format_history_line(entry, 2, false, 80)
+    assert.truthy(line:find("✗"))
+    assert.truthy(line:find("2%."))
+  end)
+
+  it("should show pointer for selected entry", function()
+    local entry = {
+      script_name = "deploy",
+      exit_code = 0,
+      execution_time = 2.0,
+      timestamp = os.time(),
+    }
+
+    local selected_line = history._format_history_line(entry, 1, true, 80)
+    local unselected_line = history._format_history_line(entry, 1, false, 80)
+
+    assert.truthy(selected_line:find(">"))
+    assert.is_nil(unselected_line:find(">"))
+  end)
+
+  it("should return highlight regions with correct groups", function()
+    local entry = {
+      script_name = "build",
+      exit_code = 0,
+      execution_time = 1.0,
+      timestamp = os.time(),
+    }
+
+    local _, regions = history._format_history_line(entry, 1, false, 80)
+    assert.is_true(#regions >= 2)
+
+    -- First region should be the status icon
+    assert.equals("success", regions[1].group)
+    assert.is_number(regions[1].col_start)
+    assert.is_number(regions[1].col_end)
+    assert.is_true(regions[1].col_end > regions[1].col_start)
+
+    -- Last region should be the time column
+    assert.equals("time_col", regions[#regions].group)
+  end)
+
+  it("should return error group for failed entries", function()
+    local entry = {
+      script_name = "test",
+      exit_code = 1,
+      execution_time = 0.5,
+      timestamp = os.time(),
+    }
+
+    local _, regions = history._format_history_line(entry, 1, false, 80)
+    assert.equals("error", regions[1].group)
+  end)
+
+  it("should truncate long script names", function()
+    local entry = {
+      script_name = "very_long_script_name_that_exceeds_column_width_limit",
+      exit_code = 0,
+      execution_time = 1.0,
+      timestamp = os.time(),
+    }
+
+    local line = history._format_history_line(entry, 1, false, 60)
+    -- Line should still be reasonably sized, not contain full name
+    assert.truthy(line:find("…"))
+  end)
+
+  it("should handle nil execution_time gracefully", function()
+    local entry = {
+      script_name = "test",
+      exit_code = 0,
+      execution_time = nil,
+      timestamp = os.time(),
+    }
+
+    local line = history._format_history_line(entry, 1, false, 80)
+    assert.is_string(line)
+    assert.truthy(line:find("N/A"))
+  end)
+
+  it("should format millisecond-level execution times", function()
+    local entry = {
+      script_name = "quick",
+      exit_code = 0,
+      execution_time = 0.05,
+      timestamp = os.time(),
+    }
+
+    local line = history._format_history_line(entry, 1, false, 80)
+    assert.truthy(line:find("ms"))
+  end)
+
+  it("should produce consistent byte offsets for highlight regions", function()
+    local entry = {
+      script_name = "build",
+      exit_code = 0,
+      execution_time = 1.5,
+      timestamp = os.time(),
+    }
+
+    local line, regions = history._format_history_line(entry, 1, false, 80)
+    for _, region in ipairs(regions) do
+      assert.is_true(region.col_start >= 0, "col_start should be non-negative")
+      assert.is_true(region.col_end <= #line, "col_end should not exceed line byte length")
+      assert.is_true(region.col_end > region.col_start, "col_end should be after col_start")
+    end
+  end)
+end)
+
 describe("termlet history integration", function()
   local termlet
 

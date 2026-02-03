@@ -481,4 +481,15 @@ function M._set_entries(entries)
   state.entries = entries or {}
 end
 
+--- Format a history line (exposed for testing)
+---@param entry table History entry
+---@param index number Index in the list
+---@param is_selected boolean Whether this entry is selected
+---@param width number Available width
+---@return string Formatted line
+---@return table Highlight regions
+function M._format_history_line(entry, index, is_selected, width)
+  return format_history_line(entry, index, is_selected, width)
+end
+
 return M

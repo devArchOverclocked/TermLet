@@ -927,4 +927,16 @@ function M._set_keybindings(keybindings)
   state.keybindings = keybindings or {}
 end
 
+--- Format a keybinding line (exposed for testing)
+---@param script table Script configuration
+---@param keybinding string|nil Current keybinding
+---@param index number Index in the list
+---@param is_selected boolean Whether this entry is selected
+---@param width number Available width
+---@return string Formatted line
+---@return table Highlight regions
+function M._format_keybinding_line(script, keybinding, index, is_selected, width)
+  return format_keybinding_line(script, keybinding, index, is_selected, width)
+end
+
 return M
