@@ -564,6 +564,220 @@ describe("termlet.history", function()
     end)
   end)
 
+  describe("hide_stacktrace", function()
+    it("should hide stacktrace without clearing entry reference", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error output" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      history.hide_stacktrace()
+      assert.is_false(history.is_stacktrace_open())
+      -- Entry should still be available for toggle
+      assert.is_not_nil(history.get_last_stacktrace_entry())
+    end)
+
+    it("should not error when no stacktrace viewer is open", function()
+      history.hide_stacktrace()
+      assert.is_false(history.is_stacktrace_open())
+    end)
+  end)
+
+  describe("toggle_stacktrace", function()
+    it("should hide visible stacktrace", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error line 1", "error line 2" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      local visible = history.toggle_stacktrace()
+      assert.is_false(visible)
+      assert.is_false(history.is_stacktrace_open())
+    end)
+
+    it("should reopen hidden stacktrace", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error line 1", "error line 2" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Hide it
+      history.toggle_stacktrace()
+      assert.is_false(history.is_stacktrace_open())
+
+      -- Toggle back open
+      local visible = history.toggle_stacktrace()
+      assert.is_true(visible)
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should preserve content after toggle cycle", function()
+      local output = { "line 1", "line 2", "error at file.py:10" }
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = output,
+      })
+
+      -- Hide and reopen
+      history.toggle_stacktrace()
+      history.toggle_stacktrace()
+
+      local buf = history._get_stacktrace_buf()
+      assert.is_not_nil(buf)
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(3, #lines)
+      assert.are.equal("line 1", lines[1])
+      assert.are.equal("line 2", lines[2])
+      assert.are.equal("error at file.py:10", lines[3])
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should return false when no entry to toggle", function()
+      local visible = history.toggle_stacktrace()
+      assert.is_false(visible)
+    end)
+
+    it("should return false after close_stacktrace clears entry", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+
+      -- Close (not hide) clears the entry
+      history.close_stacktrace()
+
+      local visible = history.toggle_stacktrace()
+      assert.is_false(visible)
+    end)
+  end)
+
+  describe("has_hidden_stacktrace", function()
+    it("should return false initially", function()
+      assert.is_false(history.has_hidden_stacktrace())
+    end)
+
+    it("should return false when stacktrace is open (not hidden)", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      assert.is_false(history.has_hidden_stacktrace())
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should return true when stacktrace is hidden", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      history.hide_stacktrace()
+      assert.is_true(history.has_hidden_stacktrace())
+
+      -- Clean up (close clears the entry)
+      history.close_stacktrace()
+    end)
+
+    it("should return false after close_stacktrace", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      history.close_stacktrace()
+      assert.is_false(history.has_hidden_stacktrace())
+    end)
+  end)
+
+  describe("get_last_stacktrace_entry", function()
+    it("should return nil initially", function()
+      assert.is_nil(history.get_last_stacktrace_entry())
+    end)
+
+    it("should return entry after showing stacktrace", function()
+      local entry = {
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      }
+      history.show_output(entry)
+
+      local last = history.get_last_stacktrace_entry()
+      assert.is_not_nil(last)
+      assert.are.equal("test", last.script_name)
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should return entry after hiding stacktrace", function()
+      local entry = {
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      }
+      history.show_output(entry)
+      history.hide_stacktrace()
+
+      local last = history.get_last_stacktrace_entry()
+      assert.is_not_nil(last)
+      assert.are.equal("test", last.script_name)
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should return nil after close_stacktrace", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      history.close_stacktrace()
+      assert.is_nil(history.get_last_stacktrace_entry())
+    end)
+  end)
+
+  describe("get_state with toggle fields", function()
+    it("should include has_hidden_stacktrace in state", function()
+      local s = history.get_state()
+      assert.is_boolean(s.has_hidden_stacktrace)
+      assert.is_false(s.has_hidden_stacktrace)
+    end)
+
+    it("should reflect hidden stacktrace in state", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      history.hide_stacktrace()
+
+      local s = history.get_state()
+      assert.is_false(s.stacktrace_open)
+      assert.is_true(s.has_hidden_stacktrace)
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+  end)
+
   describe("integration with execution flow", function()
     it("should maintain history order across multiple operations", function()
       -- Simulate multiple script executions
@@ -800,6 +1014,68 @@ describe("termlet history integration", function()
         output_lines = { "error output line 1", "error output line 2" },
       })
       assert.is_true(result)
+
+      -- Clean up
+      termlet.history.close_stacktrace()
+    end)
+  end)
+
+  describe("toggle_stacktrace", function()
+    it("should return false when no stacktrace has been shown", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local visible = termlet.toggle_stacktrace()
+      assert.is_false(visible)
+    end)
+
+    it("should hide visible stacktrace", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+        stacktrace = { enabled = true },
+      })
+
+      termlet.show_history_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+        working_dir = "/tmp",
+        output_lines = { "error at line 1" },
+      })
+      assert.is_true(termlet.history.is_stacktrace_open())
+
+      local visible = termlet.toggle_stacktrace()
+      assert.is_false(visible)
+      assert.is_false(termlet.history.is_stacktrace_open())
+
+      -- Clean up
+      termlet.history.close_stacktrace()
+    end)
+
+    it("should reopen hidden stacktrace", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+        stacktrace = { enabled = true },
+      })
+
+      termlet.show_history_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+        working_dir = "/tmp",
+        output_lines = { "error at line 1", "more output" },
+      })
+
+      -- Hide
+      termlet.toggle_stacktrace()
+      assert.is_false(termlet.history.is_stacktrace_open())
+
+      -- Reopen
+      local visible = termlet.toggle_stacktrace()
+      assert.is_true(visible)
+      assert.is_true(termlet.history.is_stacktrace_open())
 
       -- Clean up
       termlet.history.close_stacktrace()

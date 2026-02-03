@@ -1397,6 +1397,14 @@ function M.show_history_stacktrace(entry)
   return true
 end
 
+--- Toggle the stacktrace viewer open/closed
+--- When closing, remembers the entry and cursor position.
+--- When reopening, restores the same stacktrace with highlighting.
+---@return boolean Whether the stacktrace is now visible
+function M.toggle_stacktrace()
+  return history.toggle_stacktrace()
+end
+
 --- Get all history entries
 ---@return table List of history entries
 function M.get_history()
