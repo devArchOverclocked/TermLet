@@ -97,8 +97,8 @@ local config = {
     },
   },
   history = {
-    enabled = true,           -- Enable execution history tracking
-    max_entries = 50,         -- Maximum number of history entries to keep
+    enabled = true, -- Enable execution history tracking
+    max_entries = 50, -- Maximum number of history entries to keep
   },
   debug = false,
 }
