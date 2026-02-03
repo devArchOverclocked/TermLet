@@ -327,7 +327,7 @@ local function clear_history_ui()
   vim.notify("History cleared", vim.log.levels.INFO)
 end
 
---- Close the stacktrace viewer window
+--- Close the stacktrace viewer window (fully clears toggle state)
 function M.close_stacktrace()
   if state.stacktrace_win and vim.api.nvim_win_is_valid(state.stacktrace_win) then
     vim.api.nvim_win_close(state.stacktrace_win, true)
@@ -349,8 +349,45 @@ function M.hide_stacktrace()
   state.stacktrace_buf = nil
 end
 
+--- Reopen a stacktrace entry without going through the close-and-clear path.
+--- This avoids the fragile pattern where show_output calls close_stacktrace (clearing
+--- last_stacktrace_entry) and then the caller manually restores it.
+---@param entry table History entry with output_lines
+---@param saved_cursor table|nil Saved cursor position {line, col}
+---@return boolean Whether the stacktrace was successfully reopened
+local function reopen_stacktrace(entry, saved_cursor)
+  -- Close the window/buffer without clearing the entry reference
+  if state.stacktrace_win and vim.api.nvim_win_is_valid(state.stacktrace_win) then
+    vim.api.nvim_win_close(state.stacktrace_win, true)
+  end
+  state.stacktrace_win = nil
+  state.stacktrace_buf = nil
+
+  -- Use callback if provided, otherwise show directly
+  if state.stacktrace_callback then
+    state.stacktrace_callback(entry)
+  else
+    M.show_output(entry)
+  end
+
+  -- Ensure entry reference is preserved (callback/show_output may have cleared it)
+  state.last_stacktrace_entry = entry
+
+  -- Restore cursor position if we saved one
+  if saved_cursor and state.stacktrace_win and vim.api.nvim_win_is_valid(state.stacktrace_win) then
+    local buf = state.stacktrace_buf
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      local line_count = vim.api.nvim_buf_line_count(buf)
+      local target_line = math.min(saved_cursor[1], line_count)
+      pcall(vim.api.nvim_win_set_cursor, state.stacktrace_win, { target_line, saved_cursor[2] })
+    end
+  end
+
+  return M.is_stacktrace_open()
+end
+
 --- Toggle the stacktrace viewer open/closed
---- When closed, remembers the last entry and cursor position so it can be reopened
+--- When closing, remembers the last entry and cursor position so it can be reopened
 ---@return boolean Whether the stacktrace is now visible
 function M.toggle_stacktrace()
   if M.is_stacktrace_open() then
@@ -360,36 +397,13 @@ function M.toggle_stacktrace()
 
   -- Re-open the last entry if we have one
   if state.last_stacktrace_entry then
-    local entry = state.last_stacktrace_entry
-    local saved_cursor = state.stacktrace_cursor_pos
-
-    -- show_output/callback will call close_stacktrace which clears last_stacktrace_entry,
-    -- so we restore it after reopening
-    if state.stacktrace_callback then
-      state.stacktrace_callback(entry)
-    else
-      M.show_output(entry)
-    end
-
-    -- Restore entry reference (close_stacktrace inside show_output clears it)
-    state.last_stacktrace_entry = entry
-
-    -- Restore cursor position if we saved one
-    if saved_cursor and state.stacktrace_win and vim.api.nvim_win_is_valid(state.stacktrace_win) then
-      local buf = state.stacktrace_buf
-      if buf and vim.api.nvim_buf_is_valid(buf) then
-        local line_count = vim.api.nvim_buf_line_count(buf)
-        local target_line = math.min(saved_cursor[1], line_count)
-        pcall(vim.api.nvim_win_set_cursor, state.stacktrace_win, { target_line, saved_cursor[2] })
-      end
-    end
-    return true
+    return reopen_stacktrace(state.last_stacktrace_entry, state.stacktrace_cursor_pos)
   end
 
   return false
 end
 
---- Show stacktrace for the selected history entry
+--- Show stacktrace for the selected history entry (toggle-aware)
 local function show_stacktrace_selected()
   if #state.entries == 0 then
     return
@@ -397,6 +411,18 @@ local function show_stacktrace_selected()
 
   local selected_entry = state.entries[state.selected_index or 1]
   if not selected_entry then
+    return
+  end
+
+  -- If the stacktrace is already open for this same entry, toggle it closed
+  if M.is_stacktrace_open() and state.last_stacktrace_entry == selected_entry then
+    M.hide_stacktrace()
+    return
+  end
+
+  -- If we have a hidden stacktrace for this same entry, toggle it back open
+  if not M.is_stacktrace_open() and state.last_stacktrace_entry == selected_entry then
+    reopen_stacktrace(selected_entry, state.stacktrace_cursor_pos)
     return
   end
 
@@ -471,7 +497,7 @@ function M.show_output(entry)
     border = "rounded",
     title = title,
     title_pos = "center",
-    footer = " [Esc] Hide  [q] Close ",
+    footer = " [s] Toggle  [Esc] Hide  [q] Close ",
     footer_pos = "center",
   })
 
@@ -500,6 +526,9 @@ function M.show_output(entry)
   vim.keymap.set("n", "<Esc>", function()
     M.hide_stacktrace()
   end, keyopts)
+  vim.keymap.set("n", "s", function()
+    M.hide_stacktrace()
+  end, keyopts)
 
   return true
 end
@@ -512,6 +541,8 @@ end
 
 --- Close the history UI
 function M.close()
+  -- Clean up the BufLeave augroup to prevent stale callbacks
+  pcall(vim.api.nvim_del_augroup_by_name, "termlet_history_buf_leave")
   M.close_stacktrace()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
@@ -596,13 +627,28 @@ function M.open(rerun_callback, ui_config, stacktrace_callback)
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
 
-  -- Auto-close on buffer leave
+  -- Auto-close on buffer leave, but not when focus moves to our own stacktrace viewer.
+  -- We avoid `once = true` because if the first BufLeave is suppressed (stacktrace open),
+  -- the autocmd would be consumed and never fire again for legitimate leaves.
+  local buf_leave_group = vim.api.nvim_create_augroup("termlet_history_buf_leave", { clear = true })
   vim.api.nvim_create_autocmd("BufLeave", {
+    group = buf_leave_group,
     buffer = state.buf,
     callback = function()
-      M.close()
+      -- Defer so the new window is fully entered before we check
+      vim.schedule(function()
+        -- Don't close if focus moved to our stacktrace viewer
+        if M.is_stacktrace_open() then
+          local cur_win = vim.api.nvim_get_current_win()
+          if cur_win == state.stacktrace_win then
+            return
+          end
+        end
+        -- Clean up the augroup and close
+        pcall(vim.api.nvim_del_augroup_by_name, "termlet_history_buf_leave")
+        M.close()
+      end)
     end,
-    once = true,
   })
 
   -- Set up keymaps

@@ -778,6 +778,110 @@ describe("termlet.history", function()
     end)
   end)
 
+  describe("stacktrace viewer s keymap", function()
+    it("should have s keymap that hides stacktrace", function()
+      local entry = {
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error output" },
+      }
+      history.show_output(entry)
+      assert.is_true(history.is_stacktrace_open())
+
+      local buf = history._get_stacktrace_buf()
+      assert.is_not_nil(buf)
+
+      -- Verify the 's' keymap exists on the buffer
+      local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+      local has_s_keymap = false
+      for _, km in ipairs(keymaps) do
+        if km.lhs == "s" then
+          has_s_keymap = true
+          break
+        end
+      end
+      assert.is_true(has_s_keymap)
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should have Esc and q keymaps on stacktrace viewer", function()
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+
+      local buf = history._get_stacktrace_buf()
+      local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+      local has_q = false
+      local has_esc = false
+      for _, km in ipairs(keymaps) do
+        if km.lhs == "q" then
+          has_q = true
+        end
+        if km.lhs == "<Esc>" then
+          has_esc = true
+        end
+      end
+      assert.is_true(has_q)
+      assert.is_true(has_esc)
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+  end)
+
+  describe("toggle_stacktrace with reopen_stacktrace", function()
+    it("should preserve entry reference after multiple toggle cycles", function()
+      local entry = {
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error line 1", "error line 2" },
+      }
+      history.show_output(entry)
+
+      -- Cycle: hide -> reopen -> hide -> reopen
+      for _ = 1, 3 do
+        history.toggle_stacktrace() -- hide
+        assert.is_false(history.is_stacktrace_open())
+        assert.is_not_nil(history.get_last_stacktrace_entry())
+
+        history.toggle_stacktrace() -- reopen
+        assert.is_true(history.is_stacktrace_open())
+        assert.is_not_nil(history.get_last_stacktrace_entry())
+      end
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should restore content correctly after reopen", function()
+      local output = { "first line", "second line", "third line" }
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = output,
+      })
+
+      -- Toggle off and on
+      history.toggle_stacktrace()
+      history.toggle_stacktrace()
+
+      local buf = history._get_stacktrace_buf()
+      assert.is_not_nil(buf)
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(3, #lines)
+      assert.are.equal("first line", lines[1])
+      assert.are.equal("second line", lines[2])
+      assert.are.equal("third line", lines[3])
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+  end)
+
   describe("integration with execution flow", function()
     it("should maintain history order across multiple operations", function()
       -- Simulate multiple script executions
