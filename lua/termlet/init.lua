@@ -21,6 +21,9 @@ local filter = require("termlet.filter")
 -- Load filter UI module
 local filter_ui = require("termlet.filter_ui")
 
+-- Load watch module
+local watch = require("termlet.watch")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -100,6 +103,10 @@ local config = {
     enabled = true, -- Enable execution history tracking
     max_entries = 50, -- Maximum number of history entries to keep
   },
+  watch = {
+    enabled = true, -- Enable watch mode support
+    default_debounce = 500, -- Default debounce in milliseconds
+  },
   debug = false,
 }
 
@@ -145,6 +152,14 @@ local function format_terminal_title(term_config, name, status)
     status_text = icons[status] or ""
   end
   title = replace_placeholder(title, "{status}", status_text)
+
+  -- Append watch indicator if watching
+  local watch_indicator = watch.get_title_indicator(name or "")
+  title = replace_placeholder(title, "{watch}", watch_indicator)
+  -- If {watch} placeholder wasn't in the format string, append it
+  if watch_indicator ~= "" and not (term_config.title_format or ""):find("{watch}", 1, true) then
+    title = title:gsub("%s+$", "") .. watch_indicator .. " "
+  end
 
   -- Trim trailing whitespace when status placeholder was empty
   title = title:gsub("%s+$", " ")
@@ -1491,5 +1506,122 @@ function M.toggle_filter_ui()
   filter_ui.toggle(buf)
   return true
 end
+
+-- ============================================================================
+-- Watch Mode API
+-- ============================================================================
+
+--- Find the root directory for a script (used for watch mode)
+---@param script table Script configuration
+---@return string|nil Root directory path
+local function resolve_script_root(script)
+  if script.root_dir then
+    local expanded = vim.fn.expand(script.root_dir)
+    if vim.fn.isdirectory(expanded) == 1 then
+      return expanded
+    end
+  end
+
+  if config.root_dir then
+    local expanded = vim.fn.expand(config.root_dir)
+    if vim.fn.isdirectory(expanded) == 1 then
+      return expanded
+    end
+  end
+
+  -- Fallback to current working directory
+  return vim.fn.getcwd()
+end
+
+--- Start watch mode for a script by name
+---@param script_name string Name of the script
+---@return boolean Success
+function M.start_watch(script_name)
+  if not config.watch or not config.watch.enabled then
+    vim.notify("Watch mode is disabled", vim.log.levels.INFO)
+    return false
+  end
+
+  -- Find the script configuration
+  local script = nil
+  for _, s in ipairs(config.scripts) do
+    if s.name == script_name then
+      script = s
+      break
+    end
+  end
+
+  if not script then
+    vim.notify("Script not found: " .. script_name, vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Build watch config from script-level config and defaults
+  local watch_config = vim.tbl_deep_extend("force", {
+    debounce = config.watch.default_debounce or 500,
+  }, script.watch or {})
+
+  local root_dir = resolve_script_root(script)
+  if not root_dir then
+    vim.notify("Could not determine root directory for watch", vim.log.levels.ERROR)
+    return false
+  end
+
+  return watch.start(script_name, script, watch_config, root_dir, function(s)
+    execute_script(s)
+  end)
+end
+
+--- Stop watch mode for a script by name
+---@param script_name string Name of the script
+---@return boolean Success
+function M.stop_watch(script_name)
+  return watch.stop(script_name)
+end
+
+--- Toggle watch mode for a script by name
+---@param script_name string Name of the script
+---@return boolean New watch state (true = watching)
+function M.toggle_watch(script_name)
+  if not config.watch or not config.watch.enabled then
+    vim.notify("Watch mode is disabled", vim.log.levels.INFO)
+    return false
+  end
+
+  if watch.is_watching(script_name) then
+    watch.stop(script_name)
+    return false
+  else
+    return M.start_watch(script_name)
+  end
+end
+
+--- Stop all active file watchers
+---@return number Number of watchers stopped
+function M.stop_all_watches()
+  return watch.stop_all()
+end
+
+--- Check if a script is currently being watched
+---@param script_name string Name of the script
+---@return boolean
+function M.is_watching(script_name)
+  return watch.is_watching(script_name)
+end
+
+--- Get list of all scripts currently being watched
+---@return table List of script names
+function M.get_watched_scripts()
+  return watch.get_watched_scripts()
+end
+
+--- Get watch status summary
+---@return table Map of script_name -> status info
+function M.get_watch_status()
+  return watch.get_status()
+end
+
+--- Expose watch module for advanced usage
+M.watch = watch
 
 return M
