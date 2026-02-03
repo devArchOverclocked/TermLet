@@ -1926,4 +1926,248 @@ describe("termlet", function()
       assert.equals("<leader>t", bindings["test"])
     end)
   end)
+
+  describe("interactive input", function()
+    it("should accept interactive config in setup", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          interactive = {
+            enabled = true,
+            keybind = "i",
+          },
+        },
+      })
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should accept custom interactive keybind", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          interactive = {
+            enabled = true,
+            keybind = "<C-i>",
+          },
+        },
+      })
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should accept interactive disabled", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          interactive = {
+            enabled = false,
+          },
+        },
+      })
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should set up interactive keymaps on terminal buffer when enabled", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          interactive = {
+            enabled = true,
+            keybind = "i",
+          },
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+
+      -- Check that the buffer has the 'i' keymap in normal mode
+      local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+      local found_interactive_keymap = false
+      for _, km in ipairs(keymaps) do
+        if km.lhs == "i" then
+          found_interactive_keymap = true
+          break
+        end
+      end
+      assert.is_true(found_interactive_keymap, "Expected 'i' keymap on terminal buffer")
+    end)
+
+    it("should set up custom keybind on terminal buffer", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          interactive = {
+            enabled = true,
+            keybind = "<C-i>",
+          },
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+
+      local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+      local found_keymap = false
+      for _, km in ipairs(keymaps) do
+        if km.lhs == "<C-I>" or km.lhs == "<C-i>" then
+          found_keymap = true
+          break
+        end
+      end
+      assert.is_true(found_keymap, "Expected '<C-i>' keymap on terminal buffer")
+    end)
+
+    it("should not set up interactive keymaps when disabled", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          interactive = {
+            enabled = false,
+            keybind = "i",
+          },
+        },
+      })
+
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+
+      -- Check that the buffer does NOT have the 'i' keymap in normal mode
+      local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+      local found_interactive_keymap = false
+      for _, km in ipairs(keymaps) do
+        if km.lhs == "i" and km.desc and km.desc:find("interactive", 1, true) then
+          found_interactive_keymap = true
+          break
+        end
+      end
+      assert.is_false(found_interactive_keymap, "Expected no interactive keymap when disabled")
+    end)
+
+    it("should create terminal with interactive mode by default", function()
+      termlet.setup({ scripts = {} })
+
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+
+      -- Default config has interactive.enabled = true with keybind = "i"
+      local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+      local found_keymap = false
+      for _, km in ipairs(keymaps) do
+        if km.lhs == "i" then
+          found_keymap = true
+          break
+        end
+      end
+      assert.is_true(found_keymap, "Expected default interactive keymap 'i' on terminal buffer")
+    end)
+
+    describe("send_input", function()
+      it("should return false when no terminals exist", function()
+        termlet.setup({ scripts = {} })
+        local result = termlet.send_input()
+        assert.is_false(result)
+      end)
+
+      it("should return true when a terminal exists and is focused", function()
+        termlet.setup({ scripts = {} })
+        local _buf, win = termlet.create_floating_terminal({ title = "test" })
+        assert.is_not_nil(win)
+
+        -- Focus the terminal
+        vim.api.nvim_set_current_win(win)
+
+        local result = termlet.send_input()
+        assert.is_true(result)
+      end)
+
+      it("should focus and enter input mode on most recent terminal", function()
+        termlet.setup({ scripts = {} })
+        local _buf, win = termlet.create_floating_terminal({ title = "test" })
+        assert.is_not_nil(win)
+
+        -- Move focus away by creating a split
+        vim.cmd("split")
+
+        local result = termlet.send_input()
+        assert.is_true(result)
+
+        -- Should now be focused on the terminal window
+        assert.equals(win, vim.api.nvim_get_current_win())
+      end)
+    end)
+
+    describe("stop_input", function()
+      it("should return false when not in a terminal window", function()
+        termlet.setup({ scripts = {} })
+        local result = termlet.stop_input()
+        assert.is_false(result)
+      end)
+
+      it("should return true when in a terminal window", function()
+        termlet.setup({ scripts = {} })
+        local _buf, win = termlet.create_floating_terminal({ title = "test" })
+        assert.is_not_nil(win)
+
+        -- Focus the terminal
+        vim.api.nvim_set_current_win(win)
+
+        local result = termlet.stop_input()
+        assert.is_true(result)
+      end)
+    end)
+
+    describe("script execution with interactive mode", function()
+      local test_script_path
+
+      before_each(function()
+        test_script_path = vim.fn.tempname() .. ".sh"
+        local f = io.open(test_script_path, "w")
+        f:write("#!/bin/bash\necho 'waiting for input'\nread line\necho \"got: $line\"\n")
+        f:close()
+        vim.fn.system("chmod +x " .. test_script_path)
+      end)
+
+      after_each(function()
+        if test_script_path then
+          vim.fn.delete(test_script_path)
+        end
+      end)
+
+      it("should create interactive terminal when running a script", function()
+        termlet.setup({
+          scripts = {
+            { name = "interactive_test", filename = test_script_path },
+          },
+          terminal = {
+            focus = "terminal",
+            interactive = {
+              enabled = true,
+              keybind = "i",
+            },
+          },
+        })
+
+        termlet.run_interactive_test()
+        vim.wait(100)
+
+        -- Verify the terminal was created and has the interactive keymap
+        local current_win = vim.api.nvim_get_current_win()
+        local buf = vim.api.nvim_win_get_buf(current_win)
+
+        local keymaps = vim.api.nvim_buf_get_keymap(buf, "n")
+        local found_keymap = false
+        for _, km in ipairs(keymaps) do
+          if km.lhs == "i" then
+            found_keymap = true
+            break
+          end
+        end
+        assert.is_true(found_keymap, "Expected interactive keymap on script terminal")
+      end)
+    end)
+  end)
 end)

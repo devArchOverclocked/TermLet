@@ -48,6 +48,11 @@ local config = {
     max_saved_buffers = 5, -- Maximum number of hidden buffers to keep
     focus = "previous", -- "terminal" | "previous" | "none" - where to place focus after opening terminal
     auto_insert = false, -- Auto-enter insert mode when focus="terminal"
+    interactive = {
+      enabled = true, -- Enable interactive input mode toggle on terminal buffers
+      keybind = "i", -- Normal-mode key to enter terminal input mode
+      exit_keybind = "<C-\\><C-n>", -- Key to exit terminal input mode (Neovim default)
+    },
     filters = {
       enabled = false, -- Enable output filtering
       show_only = {}, -- Only show lines matching these patterns
@@ -248,6 +253,36 @@ local function compute_win_opts(term_config, title)
   }
 end
 
+-- Set up interactive input keymaps on a terminal buffer.
+-- In normal mode, the configured keybind enters terminal mode so the user can
+-- type into the running process.  The exit keybind (default <C-\><C-n>) returns
+-- to normal mode.
+local function setup_interactive_keymaps(buf, win, interactive_config)
+  if not interactive_config or not interactive_config.enabled then
+    return
+  end
+
+  local enter_key = interactive_config.keybind or "i"
+
+  -- Normal-mode keybind: focus the terminal window (if not already focused) and
+  -- enter terminal mode so keystrokes are sent to the process.
+  vim.api.nvim_buf_set_keymap(buf, "n", enter_key, "", {
+    noremap = true,
+    silent = true,
+    desc = "TermLet: Enter interactive input mode",
+    callback = function()
+      -- Ensure the terminal window has focus
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_current_win(win)
+      end
+      vim.cmd("startinsert")
+    end,
+  })
+end
+
+-- Expose for testing
+M._setup_interactive_keymaps = setup_interactive_keymaps
+
 -- Apply winhighlight groups to a window
 local function apply_win_highlights(win, highlights)
   if highlights then
@@ -365,6 +400,9 @@ function M.create_floating_terminal(opts)
     end,
     once = true,
   })
+
+  -- Set up interactive input keymaps so the user can type into the terminal
+  setup_interactive_keymaps(buf, win, term_config.interactive)
 
   return buf, win
 end
@@ -1284,6 +1322,56 @@ function M.toggle_focus()
     -- We're not in a terminal, switch to the most recent terminal
     return M.focus_terminal()
   end
+end
+
+-- ============================================================================
+-- Interactive Input API
+-- ============================================================================
+
+--- Enter interactive input mode on the most recent (or current) terminal window.
+--- This focuses the terminal and switches to terminal mode so keystrokes are
+--- sent to the running process.
+---@return boolean Success
+function M.send_input()
+  local current_win = vim.api.nvim_get_current_win()
+
+  -- If we're already in a terminal window, just enter terminal mode
+  if active_terminals[current_win] then
+    vim.cmd("startinsert")
+    return true
+  end
+
+  -- Otherwise, focus the most recent terminal first
+  local wins = vim.tbl_keys(active_terminals)
+  if #wins == 0 then
+    vim.notify("No active terminals", vim.log.levels.INFO)
+    return false
+  end
+
+  local last_win = wins[#wins]
+  if not vim.api.nvim_win_is_valid(last_win) then
+    vim.notify("No valid terminal window found", vim.log.levels.WARN)
+    return false
+  end
+
+  vim.api.nvim_set_current_win(last_win)
+  vim.cmd("startinsert")
+  return true
+end
+
+--- Exit interactive input mode and return to normal mode in the terminal.
+--- This is equivalent to pressing <C-\><C-n> in terminal mode.
+---@return boolean Success
+function M.stop_input()
+  local current_win = vim.api.nvim_get_current_win()
+
+  if not active_terminals[current_win] then
+    vim.notify("Not in a terminal window", vim.log.levels.INFO)
+    return false
+  end
+
+  vim.cmd("stopinsert")
+  return true
 end
 
 -- ============================================================================
