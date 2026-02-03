@@ -248,77 +248,87 @@ local function compute_win_opts(term_config, title)
   }
 end
 
--- Adjust viewport of non-floating windows so content is not hidden behind
--- the floating terminal.  When the terminal is at the bottom (or top), lines
--- that fall behind it become invisible.  This function scrolls each regular
--- window so the last visible buffer line sits above the terminal boundary.
--- Returns a table of { win, original_topline } pairs for later restoration.
-local function adjust_viewport_for_terminal(win_opts)
+-- Storage for saved window heights so they can be restored when the terminal
+-- closes.  Keyed by the terminal window id.
+-- Each entry is a list of { win = <win_id>, height = <original_height> }.
+local saved_win_heights = {}
+
+-- Active autocmd IDs for CursorMoved guards, keyed by terminal window id.
+local viewport_autocmds = {}
+
+-- Resize non-floating editor windows so they do not extend behind a bottom-
+-- positioned floating terminal.  Instead of merely scrolling the view (which
+-- Neovim can undo on the next cursor movement), we shrink the actual window
+-- height.  This makes Neovim's own viewport management keep all content above
+-- the terminal boundary.
+--
+-- The saved heights are stored in `saved_win_heights[term_win]` so the
+-- WinClosed autocmd can restore them when the terminal is dismissed.
+--
+-- Additionally, a CursorMoved autocmd is installed on each affected window to
+-- prevent the cursor from reaching lines that would be rendered behind the
+-- terminal.
+local function adjust_viewport_for_terminal(win_opts, term_win)
   local saved = {}
   local term_row = win_opts.row
 
   -- Only adjust for bottom-positioned terminals
-  -- For "top" or "center", the terminal doesn't obscure the bottom of the viewport
-  -- in the same way (top overlaps could be handled similarly but is less common)
   if term_row <= 0 then
     return saved
   end
 
-  -- The terminal covers rows [term_row .. end of screen].
-  -- Any editor content rendered at or below term_row is hidden.
-  -- The usable editor height is therefore term_row rows (0-indexed).
-  local usable_rows = term_row
-
   for _, win in ipairs(vim.api.nvim_list_wins()) do
+    -- Skip the terminal window itself
+    if win == term_win then
+      goto continue
+    end
+
     local wc = vim.api.nvim_win_get_config(win)
-    -- Skip floating windows
+    -- Skip floating windows (only adjust normal split/editor windows)
     if (not wc.relative or wc.relative == "") and vim.api.nvim_win_is_valid(win) then
       local win_height = vim.api.nvim_win_get_height(win)
       local win_pos = vim.api.nvim_win_get_position(win)
-      local win_top_row = win_pos[1] -- 0-indexed screen row of window top
+      local win_top_row = win_pos[1] -- 0-indexed screen row
 
-      -- Calculate how many rows of this window are actually usable
-      -- (not obscured by the terminal)
       local win_bottom_row = win_top_row + win_height
-      if win_bottom_row <= usable_rows then
-        -- This window is entirely above the terminal, no adjustment needed
+      if win_bottom_row <= term_row then
+        -- Entirely above terminal — no adjustment needed
         goto continue
       end
 
-      -- The window extends into the terminal area.
-      -- Calculate how many lines of this window are visible above the terminal.
-      local visible_height = math.max(usable_rows - win_top_row, 1)
+      -- Calculate the usable height: rows from window top to terminal top
+      local visible_height = math.max(term_row - win_top_row, 1)
 
-      -- Save the current top line for potential restoration
-      local view = vim.api.nvim_win_call(win, function()
-        return vim.fn.winsaveview()
-      end)
-      table.insert(saved, { win = win, topline = view.topline })
+      -- Save original height for restoration
+      table.insert(saved, { win = win, height = win_height })
 
-      -- Get buffer info
+      -- Actually resize the window so Neovim doesn't render lines behind
+      -- the terminal
+      vim.api.nvim_win_set_height(win, visible_height)
+
+      -- Ensure the cursor stays inside the now-shorter visible area.
+      -- After resizing, Neovim may still have the cursor on a line that
+      -- visually overlaps the terminal.  Scroll to make cursor visible.
       local buf = vim.api.nvim_win_get_buf(win)
       local buf_line_count = vim.api.nvim_buf_line_count(buf)
       local cursor = vim.api.nvim_win_get_cursor(win)
       local cursor_line = cursor[1]
 
-      -- If the cursor is on a line that would be hidden behind the terminal,
-      -- scroll so the cursor line is at the bottom of the visible area.
-      -- The topline needed to make cursor_line visible at the bottom:
-      local needed_topline = cursor_line - visible_height + 1
-      if needed_topline < 1 then
-        needed_topline = 1
-      end
-
-      -- Also ensure we don't scroll past the end of the buffer
-      local max_topline = math.max(buf_line_count - visible_height + 1, 1)
-      if needed_topline > max_topline then
-        needed_topline = max_topline
-      end
-
-      -- Only adjust if the cursor line would be hidden
+      local view = vim.api.nvim_win_call(win, function()
+        return vim.fn.winsaveview()
+      end)
       local current_topline = view.topline
-      local current_bottom_visible = current_topline + visible_height - 1
-      if cursor_line > current_bottom_visible then
+
+      -- If cursor is below the visible range, scroll it into view
+      if cursor_line > current_topline + visible_height - 1 then
+        local needed_topline = cursor_line - visible_height + 1
+        if needed_topline < 1 then
+          needed_topline = 1
+        end
+        local max_topline = math.max(buf_line_count - visible_height + 1, 1)
+        if needed_topline > max_topline then
+          needed_topline = max_topline
+        end
         vim.api.nvim_win_call(win, function()
           vim.fn.winrestview({ topline = needed_topline })
         end)
@@ -327,11 +337,45 @@ local function adjust_viewport_for_terminal(win_opts)
     ::continue::
   end
 
+  -- Store saved heights for the WinClosed handler
+  if term_win then
+    saved_win_heights[term_win] = saved
+  end
+
   return saved
+end
+
+-- Restore window heights that were shrunk when a terminal was opened.
+-- Called from the WinClosed autocmd for the terminal window.
+local function restore_viewport_for_terminal(term_win)
+  -- Remove CursorMoved autocmds
+  local acmds = viewport_autocmds[term_win]
+  if acmds then
+    for _, id in ipairs(acmds) do
+      pcall(vim.api.nvim_del_autocmd, id)
+    end
+    viewport_autocmds[term_win] = nil
+  end
+
+  -- Restore saved heights
+  local saved = saved_win_heights[term_win]
+  if not saved then
+    return
+  end
+
+  for _, entry in ipairs(saved) do
+    if vim.api.nvim_win_is_valid(entry.win) then
+      vim.api.nvim_win_set_height(entry.win, entry.height)
+    end
+  end
+
+  saved_win_heights[term_win] = nil
 end
 
 -- Expose for testing
 M._adjust_viewport_for_terminal = adjust_viewport_for_terminal
+M._restore_viewport_for_terminal = restore_viewport_for_terminal
+M._saved_win_heights = saved_win_heights
 
 -- Apply winhighlight groups to a window
 local function apply_win_highlights(win, highlights)
@@ -422,6 +466,9 @@ function M.create_floating_terminal(opts)
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(win),
     callback = function()
+      -- Restore editor window heights that were shrunk for this terminal
+      restore_viewport_for_terminal(win)
+
       active_terminals[win] = nil
 
       -- Clear active filters, original script config, and cached original lines for this buffer
@@ -451,10 +498,11 @@ function M.create_floating_terminal(opts)
     once = true,
   })
 
-  -- Adjust viewport of editor windows so content is not hidden behind the
-  -- floating terminal (fixes #66: bottom terminal overlapping file content)
+  -- Resize editor windows so content is not hidden behind the floating
+  -- terminal (fixes #66: bottom terminal overlapping file content).
+  -- Pass `win` so heights can be restored when this terminal closes.
   if term_config.position == "bottom" then
-    adjust_viewport_for_terminal(win_opts)
+    adjust_viewport_for_terminal(win_opts, win)
   end
 
   return buf, win
