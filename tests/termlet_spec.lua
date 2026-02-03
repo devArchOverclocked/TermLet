@@ -1926,4 +1926,206 @@ describe("termlet", function()
       assert.equals("<leader>t", bindings["test"])
     end)
   end)
+
+  describe("viewport adjustment for bottom terminal (#66)", function()
+    it("should expose _adjust_viewport_for_terminal function", function()
+      termlet.setup({ scripts = {} })
+      assert.is_function(termlet._adjust_viewport_for_terminal)
+    end)
+
+    it("should return a table of saved viewports", function()
+      termlet.setup({ scripts = {} })
+      local result = termlet._adjust_viewport_for_terminal({
+        row = 20,
+        height = 5,
+        width = 80,
+        col = 0,
+      })
+      assert.is_table(result)
+    end)
+
+    it("should not adjust when terminal row is 0", function()
+      termlet.setup({ scripts = {} })
+      local result = termlet._adjust_viewport_for_terminal({
+        row = 0,
+        height = 5,
+        width = 80,
+        col = 0,
+      })
+      -- No adjustments should be made for row 0
+      assert.are.equal(0, #result)
+    end)
+
+    it("should create terminal at bottom without errors", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          position = "bottom",
+          height_ratio = 0.16,
+        },
+      })
+      local buf, win = termlet.create_floating_terminal({})
+      assert.is_not_nil(buf)
+      assert.is_not_nil(win)
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+
+      -- The terminal should be positioned at the bottom
+      local win_config = vim.api.nvim_win_get_config(win)
+      assert.is_truthy(win_config.row)
+    end)
+
+    it("should adjust viewport when cursor is near bottom of file", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          position = "bottom",
+          height_ratio = 0.3,
+        },
+      })
+
+      -- Create a buffer with many lines
+      local test_buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(test_buf, 0, -1, false, lines)
+
+      -- Open the buffer in the current window
+      local editor_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(editor_win, test_buf)
+
+      -- Move cursor to near the bottom
+      vim.api.nvim_win_set_cursor(editor_win, { 200, 0 })
+
+      -- Scroll so the cursor is visible at the bottom
+      vim.api.nvim_win_call(editor_win, function()
+        vim.cmd("normal! zb")
+      end)
+
+      -- Now create a floating terminal at the bottom
+      local _term_buf, term_win = termlet.create_floating_terminal({})
+      assert.is_not_nil(term_win)
+
+      -- The cursor should still be at line 200
+      local cursor = vim.api.nvim_win_get_cursor(editor_win)
+      assert.are.equal(200, cursor[1])
+
+      -- Clean up
+      vim.api.nvim_buf_delete(test_buf, { force = true })
+    end)
+
+    it("should not adjust viewport for center-positioned terminal", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          position = "center",
+          height_ratio = 0.3,
+        },
+      })
+
+      -- Create a buffer with many lines
+      local test_buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 100 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(test_buf, 0, -1, false, lines)
+
+      local editor_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(editor_win, test_buf)
+      vim.api.nvim_win_set_cursor(editor_win, { 50, 0 })
+
+      -- Save the view before opening terminal
+      local view_before = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview()
+      end)
+
+      -- Create terminal at center
+      local _term_buf, term_win = termlet.create_floating_terminal({})
+      assert.is_not_nil(term_win)
+
+      -- View should not be changed for center position
+      local view_after = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview()
+      end)
+      assert.are.equal(view_before.topline, view_after.topline)
+
+      -- Clean up
+      vim.api.nvim_buf_delete(test_buf, { force = true })
+    end)
+
+    it("should not adjust viewport for top-positioned terminal", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          position = "top",
+          height_ratio = 0.3,
+        },
+      })
+
+      -- Create a buffer with many lines
+      local test_buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 100 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(test_buf, 0, -1, false, lines)
+
+      local editor_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(editor_win, test_buf)
+      vim.api.nvim_win_set_cursor(editor_win, { 10, 0 })
+
+      -- Save the view before opening terminal
+      local view_before = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview()
+      end)
+
+      -- Create terminal at top
+      local _term_buf, term_win = termlet.create_floating_terminal({})
+      assert.is_not_nil(term_win)
+
+      -- View should not be changed for top position
+      local view_after = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview()
+      end)
+      assert.are.equal(view_before.topline, view_after.topline)
+
+      -- Clean up
+      vim.api.nvim_buf_delete(test_buf, { force = true })
+    end)
+
+    it("should handle small buffers that fit entirely on screen", function()
+      termlet.setup({
+        scripts = {},
+        terminal = {
+          position = "bottom",
+          height_ratio = 0.3,
+        },
+      })
+
+      -- Create a buffer with just a few lines
+      local test_buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 5 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(test_buf, 0, -1, false, lines)
+
+      local editor_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(editor_win, test_buf)
+      vim.api.nvim_win_set_cursor(editor_win, { 3, 0 })
+
+      -- Create terminal - should not error even with small buffer
+      local _term_buf, term_win = termlet.create_floating_terminal({})
+      assert.is_not_nil(term_win)
+
+      -- Cursor should still be on the same line
+      local cursor = vim.api.nvim_win_get_cursor(editor_win)
+      assert.are.equal(3, cursor[1])
+
+      -- Clean up
+      vim.api.nvim_buf_delete(test_buf, { force = true })
+    end)
+  end)
 end)

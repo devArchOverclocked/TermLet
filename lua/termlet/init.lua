@@ -248,6 +248,91 @@ local function compute_win_opts(term_config, title)
   }
 end
 
+-- Adjust viewport of non-floating windows so content is not hidden behind
+-- the floating terminal.  When the terminal is at the bottom (or top), lines
+-- that fall behind it become invisible.  This function scrolls each regular
+-- window so the last visible buffer line sits above the terminal boundary.
+-- Returns a table of { win, original_topline } pairs for later restoration.
+local function adjust_viewport_for_terminal(win_opts)
+  local saved = {}
+  local term_row = win_opts.row
+
+  -- Only adjust for bottom-positioned terminals
+  -- For "top" or "center", the terminal doesn't obscure the bottom of the viewport
+  -- in the same way (top overlaps could be handled similarly but is less common)
+  if term_row <= 0 then
+    return saved
+  end
+
+  -- The terminal covers rows [term_row .. end of screen].
+  -- Any editor content rendered at or below term_row is hidden.
+  -- The usable editor height is therefore term_row rows (0-indexed).
+  local usable_rows = term_row
+
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local wc = vim.api.nvim_win_get_config(win)
+    -- Skip floating windows
+    if (not wc.relative or wc.relative == "") and vim.api.nvim_win_is_valid(win) then
+      local win_height = vim.api.nvim_win_get_height(win)
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_top_row = win_pos[1] -- 0-indexed screen row of window top
+
+      -- Calculate how many rows of this window are actually usable
+      -- (not obscured by the terminal)
+      local win_bottom_row = win_top_row + win_height
+      if win_bottom_row <= usable_rows then
+        -- This window is entirely above the terminal, no adjustment needed
+        goto continue
+      end
+
+      -- The window extends into the terminal area.
+      -- Calculate how many lines of this window are visible above the terminal.
+      local visible_height = math.max(usable_rows - win_top_row, 1)
+
+      -- Save the current top line for potential restoration
+      local view = vim.api.nvim_win_call(win, function()
+        return vim.fn.winsaveview()
+      end)
+      table.insert(saved, { win = win, topline = view.topline })
+
+      -- Get buffer info
+      local buf = vim.api.nvim_win_get_buf(win)
+      local buf_line_count = vim.api.nvim_buf_line_count(buf)
+      local cursor = vim.api.nvim_win_get_cursor(win)
+      local cursor_line = cursor[1]
+
+      -- If the cursor is on a line that would be hidden behind the terminal,
+      -- scroll so the cursor line is at the bottom of the visible area.
+      -- The topline needed to make cursor_line visible at the bottom:
+      local needed_topline = cursor_line - visible_height + 1
+      if needed_topline < 1 then
+        needed_topline = 1
+      end
+
+      -- Also ensure we don't scroll past the end of the buffer
+      local max_topline = math.max(buf_line_count - visible_height + 1, 1)
+      if needed_topline > max_topline then
+        needed_topline = max_topline
+      end
+
+      -- Only adjust if the cursor line would be hidden
+      local current_topline = view.topline
+      local current_bottom_visible = current_topline + visible_height - 1
+      if cursor_line > current_bottom_visible then
+        vim.api.nvim_win_call(win, function()
+          vim.fn.winrestview({ topline = needed_topline })
+        end)
+      end
+    end
+    ::continue::
+  end
+
+  return saved
+end
+
+-- Expose for testing
+M._adjust_viewport_for_terminal = adjust_viewport_for_terminal
+
 -- Apply winhighlight groups to a window
 local function apply_win_highlights(win, highlights)
   if highlights then
@@ -365,6 +450,12 @@ function M.create_floating_terminal(opts)
     end,
     once = true,
   })
+
+  -- Adjust viewport of editor windows so content is not hidden behind the
+  -- floating terminal (fixes #66: bottom terminal overlapping file content)
+  if term_config.position == "bottom" then
+    adjust_viewport_for_terminal(win_opts)
+  end
 
   return buf, win
 end
