@@ -140,11 +140,9 @@ end
 
 --- Format a history entry for display
 ---@param entry table History entry
----@param index number Index in the list
 ---@param is_selected boolean Whether this entry is selected
----@param width number Available width for the line
 ---@return string Formatted line
-local function format_history_line(entry, _index, is_selected, _width)
+local function format_history_line(entry, is_selected)
   local prefix = is_selected and "  > " or "    "
 
   -- Status icon
@@ -204,7 +202,7 @@ local function render_history()
     local selected_index = state.selected_index or 1
     for i, entry in ipairs(state.entries) do
       local is_selected = (i == selected_index)
-      local line = format_history_line(entry, i, is_selected, width)
+      local line = format_history_line(entry, is_selected)
       table.insert(lines, line)
 
       if is_selected then
