@@ -11,6 +11,9 @@ local state = {
   win = nil,
   config = nil,
   rerun_callback = nil,
+  stacktrace_callback = nil, -- Callback to show stacktrace for an entry
+  stacktrace_buf = nil, -- Buffer for stacktrace viewer
+  stacktrace_win = nil, -- Window for stacktrace viewer
 }
 
 -- Default history UI configuration
@@ -110,7 +113,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [Enter] Re-run  [c] Clear  [q] Close ",
+    footer = " [Enter] Re-run  [s] Stacktrace  [c] Clear  [q] Close ",
     footer_pos = "center",
   }
 end
@@ -322,8 +325,138 @@ local function clear_history_ui()
   vim.notify("History cleared", vim.log.levels.INFO)
 end
 
+--- Close the stacktrace viewer window
+function M.close_stacktrace()
+  if state.stacktrace_win and vim.api.nvim_win_is_valid(state.stacktrace_win) then
+    vim.api.nvim_win_close(state.stacktrace_win, true)
+  end
+  state.stacktrace_win = nil
+  state.stacktrace_buf = nil
+end
+
+--- Show stacktrace for the selected history entry
+local function show_stacktrace_selected()
+  if #state.entries == 0 then
+    return
+  end
+
+  local selected_entry = state.entries[state.selected_index or 1]
+  if not selected_entry then
+    return
+  end
+
+  -- Check if the entry has a non-zero exit code
+  if selected_entry.exit_code == 0 then
+    vim.notify("Script succeeded (exit code 0) - no stacktrace to show", vim.log.levels.INFO)
+    return
+  end
+
+  -- Check if we have output lines stored
+  if not selected_entry.output_lines or #selected_entry.output_lines == 0 then
+    vim.notify("No output captured for this entry", vim.log.levels.INFO)
+    return
+  end
+
+  -- Use stacktrace_callback if provided (delegates to init.lua for stacktrace processing)
+  if state.stacktrace_callback then
+    state.stacktrace_callback(selected_entry)
+    return
+  end
+
+  -- Fallback: show raw output in a floating window
+  M.show_output(selected_entry)
+end
+
+--- Show output for a history entry in a floating window
+---@param entry table History entry with output_lines
+function M.show_output(entry)
+  if not entry or not entry.output_lines or #entry.output_lines == 0 then
+    vim.notify("No output available for this entry", vim.log.levels.INFO)
+    return false
+  end
+
+  -- Close existing stacktrace viewer
+  M.close_stacktrace()
+
+  -- Create buffer
+  local buf = vim.api.nvim_create_buf(false, true)
+  if not buf then
+    vim.notify("Failed to create stacktrace buffer", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Set buffer content
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, entry.output_lines)
+
+  -- Set buffer options
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].filetype = "termlet_stacktrace"
+  vim.bo[buf].buflisted = false
+  vim.bo[buf].modifiable = false
+
+  -- Calculate window size
+  local width = math.floor(vim.o.columns * 0.8)
+  local height = math.floor(vim.o.lines * 0.7)
+  width = math.max(width, 60)
+  height = math.max(height, 15)
+
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  local title = " Stacktrace: " .. (entry.script_name or "unknown") .. " (exit:" .. (entry.exit_code or -1) .. ") "
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    anchor = "NW",
+    style = "minimal",
+    border = "rounded",
+    title = title,
+    title_pos = "center",
+    footer = " [q] Close ",
+    footer_pos = "center",
+  })
+
+  if not win then
+    vim.api.nvim_buf_delete(buf, { force = true })
+    vim.notify("Failed to create stacktrace window", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Set window options
+  vim.wo[win].cursorline = true
+  vim.wo[win].wrap = true
+  vim.wo[win].number = true
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+
+  state.stacktrace_buf = buf
+  state.stacktrace_win = win
+
+  -- Set up keymaps for the stacktrace viewer
+  local keyopts = { noremap = true, silent = true, buffer = buf }
+  vim.keymap.set("n", "q", function()
+    M.close_stacktrace()
+  end, keyopts)
+  vim.keymap.set("n", "<Esc>", function()
+    M.close_stacktrace()
+  end, keyopts)
+
+  return true
+end
+
+--- Check if stacktrace viewer is currently open
+---@return boolean
+function M.is_stacktrace_open()
+  return state.stacktrace_win ~= nil and vim.api.nvim_win_is_valid(state.stacktrace_win)
+end
+
 --- Close the history UI
 function M.close()
+  M.close_stacktrace()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
   end
@@ -348,6 +481,7 @@ local function setup_keymaps()
   -- Actions
   vim.keymap.set("n", "<CR>", rerun_selected, opts)
   vim.keymap.set("n", "<Enter>", rerun_selected, opts)
+  vim.keymap.set("n", "s", show_stacktrace_selected, opts)
   vim.keymap.set("n", "c", clear_history_ui, opts)
   vim.keymap.set("n", "q", M.close, opts)
   vim.keymap.set("n", "<Esc>", M.close, opts)
@@ -356,8 +490,9 @@ end
 --- Open the history browser UI
 ---@param rerun_callback function Callback to re-run a script from history
 ---@param ui_config table|nil Optional UI configuration
+---@param stacktrace_callback function|nil Optional callback to show stacktrace for an entry
 ---@return boolean Success
-function M.open(rerun_callback, ui_config)
+function M.open(rerun_callback, ui_config, stacktrace_callback)
   -- Close existing window if open
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     M.close()
@@ -372,6 +507,7 @@ function M.open(rerun_callback, ui_config)
   -- Initialize state
   state.selected_index = 1
   state.rerun_callback = rerun_callback
+  state.stacktrace_callback = stacktrace_callback
   state.config = vim.tbl_deep_extend("force", default_config, ui_config or {})
 
   -- Create buffer
@@ -435,12 +571,19 @@ function M.get_state()
     selected_index = state.selected_index,
     entry_count = #state.entries,
     max_entries = state.max_entries,
+    stacktrace_open = M.is_stacktrace_open(),
   }
 end
 
 --- Set state directly (for testing)
 function M._set_entries(entries)
   state.entries = entries or {}
+end
+
+--- Get the stacktrace buffer (for external highlighting)
+---@return number|nil Buffer ID
+function M._get_stacktrace_buf()
+  return state.stacktrace_buf
 end
 
 return M

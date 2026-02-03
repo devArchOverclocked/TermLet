@@ -656,12 +656,20 @@ local function execute_script(script)
         if config.history.enabled then
           local end_time = vim.loop.hrtime()
           local execution_time = (end_time - start_time) / 1e9 -- Convert to seconds
+
+          -- Capture terminal buffer output for stacktrace viewing
+          local output_lines = nil
+          if code ~= 0 and buf and vim.api.nvim_buf_is_valid(buf) then
+            output_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+          end
+
           history.add_entry({
             script_name = script.name,
             exit_code = code,
             execution_time = execution_time,
             timestamp = os.time(),
             working_dir = cwd,
+            output_lines = output_lines,
             script = {
               name = script.name,
               filename = script.filename,
@@ -1316,13 +1324,20 @@ function M.show_history()
     return false
   end
 
-  return history.open(function(entry)
-    if entry.script then
-      execute_script(entry.script)
-    else
-      vim.notify("Script configuration not found in history", vim.log.levels.ERROR)
+  return history.open(
+    function(entry)
+      if entry.script then
+        execute_script(entry.script)
+      else
+        vim.notify("Script configuration not found in history", vim.log.levels.ERROR)
+      end
+    end,
+    nil,
+    function(entry)
+      -- Stacktrace callback: show output with stacktrace highlighting
+      M.show_history_stacktrace(entry)
     end
-  end)
+  )
 end
 
 --- Close the history browser
@@ -1343,6 +1358,43 @@ function M.toggle_history()
   else
     M.show_history()
   end
+end
+
+--- Show stacktrace for a history entry
+--- Opens a floating window with the entry's output and highlights stacktrace lines
+---@param entry table History entry with output_lines
+---@return boolean Success
+function M.show_history_stacktrace(entry)
+  if not entry then
+    vim.notify("No entry provided", vim.log.levels.WARN)
+    return false
+  end
+
+  if not entry.output_lines or #entry.output_lines == 0 then
+    vim.notify("No output captured for this entry", vim.log.levels.INFO)
+    return false
+  end
+
+  -- Show the output window via history module
+  local ok = history.show_output(entry)
+  if not ok then
+    return false
+  end
+
+  -- Apply stacktrace highlighting if enabled
+  if config.stacktrace.enabled then
+    local st_state = history.get_state()
+    -- The stacktrace viewer buffer is accessible via history state
+    if st_state.stacktrace_open then
+      local st_buf = history._get_stacktrace_buf()
+      if st_buf and vim.api.nvim_buf_is_valid(st_buf) then
+        local cwd = entry.working_dir or vim.fn.getcwd()
+        stacktrace.scan_buffer_for_stacktraces(st_buf, cwd)
+      end
+    end
+  end
+
+  return true
 end
 
 --- Get all history entries
