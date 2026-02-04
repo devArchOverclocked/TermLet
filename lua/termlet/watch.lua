@@ -4,8 +4,11 @@
 local M = {}
 
 -- Active watchers keyed by script name
--- Each entry: { handle = uv_fs_event, timer = uv_timer, script = table, callback = function }
+-- Each entry: { handle = uv_fs_event, timer = uv_timer, script = table, callback = function, generation = number }
 local watchers = {}
+
+-- Generation counter to detect stale callbacks after watcher replacement
+local generation = 0
 
 -- Default watch configuration
 local default_watch_config = {
@@ -204,6 +207,10 @@ function M.start(script_name, script, watch_config, root_dir, callback)
   local timer = vim.uv.new_timer()
   local handles = {}
 
+  -- Assign a unique generation so stale callbacks from replaced watchers are ignored
+  generation = generation + 1
+  local my_generation = generation
+
   -- Track the watcher entry
   watchers[script_name] = {
     handles = handles,
@@ -212,6 +219,7 @@ function M.start(script_name, script, watch_config, root_dir, callback)
     callback = callback,
     config = config,
     root_dir = root_dir,
+    generation = my_generation,
   }
 
   -- Create fs_event watchers for each directory
@@ -247,9 +255,11 @@ function M.start(script_name, script, watch_config, root_dir, callback)
 
         timer:start(debounce_ms, 0, function()
           vim.schedule(function()
-            if watchers[script_name] and watchers[script_name].callback then
+            -- Check generation to ignore stale callbacks from replaced watchers
+            local w = watchers[script_name]
+            if w and w.generation == my_generation and w.callback then
               vim.notify("[TermLet Watch] Re-running '" .. script_name .. "' (changed: " .. rel_path .. ")")
-              watchers[script_name].callback(watchers[script_name].script)
+              w.callback(w.script)
             end
           end)
         end)
@@ -313,12 +323,15 @@ end
 --- Stop all active watchers
 ---@return number Number of watchers stopped
 function M.stop_all()
-  local count = 0
-  for script_name, _ in pairs(watchers) do
-    M.stop(script_name)
-    count = count + 1
+  -- Collect keys first to avoid modifying table during pairs() iteration
+  local names = {}
+  for name, _ in pairs(watchers) do
+    table.insert(names, name)
   end
-  return count
+  for _, name in ipairs(names) do
+    M.stop(name)
+  end
+  return #names
 end
 
 --- Toggle watch mode for a script
@@ -397,6 +410,7 @@ end
 function M._reset()
   M.stop_all()
   watchers = {}
+  generation = 0
 end
 
 return M

@@ -498,6 +498,41 @@ describe("termlet.watch", function()
       vim.fn.delete(tmp, "rf")
     end)
   end)
+
+  describe("watcher replacement", function()
+    it("should assign unique generation to each watcher to prevent stale callbacks", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+
+      local call_count_1 = 0
+      local call_count_2 = 0
+      local config = { patterns = {}, exclude = {}, debounce = 100 }
+
+      -- Start first watcher
+      watch.start("test", { name = "test" }, config, tmp, function()
+        call_count_1 = call_count_1 + 1
+      end)
+      assert.is_true(watch.is_watching("test"))
+
+      -- Replace with second watcher (calls stop internally)
+      watch.start("test", { name = "test_v2" }, config, tmp, function()
+        call_count_2 = call_count_2 + 1
+      end)
+      assert.is_true(watch.is_watching("test"))
+
+      -- Verify the new watcher's script is the replaced one
+      local state = watch.get_state()
+      assert.is_not_nil(state["test"])
+
+      -- The old callback should never have been invoked by the replacement
+      assert.are.equal(0, call_count_1)
+      assert.are.equal(0, call_count_2)
+
+      -- Cleanup
+      watch.stop("test")
+      vim.fn.delete(tmp, "rf")
+    end)
+  end)
 end)
 
 describe("termlet watch integration", function()
