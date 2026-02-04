@@ -2004,25 +2004,45 @@ describe("termlet", function()
         vim.cmd("normal! zb")
       end)
 
+      -- Save view before opening terminal
+      local topline_before = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview().topline
+      end)
+
       -- Create a floating terminal at bottom position
       local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
       assert.is_true(vim.api.nvim_win_is_valid(win))
 
-      -- The viewport of the editor window should have been adjusted
-      -- so the cursor is still visible
-      local view = vim.api.nvim_win_call(editor_win, function()
-        return vim.fn.winsaveview()
-      end)
       -- The cursor should still be at line 100
       local cursor = vim.api.nvim_win_get_cursor(editor_win)
       assert.are.equal(100, cursor[1])
 
-      -- The topline should have been adjusted to keep the cursor visible
-      -- We just verify it was adjusted (topline should be > 1 for 100-line file)
-      assert.is_true(view.topline >= 1)
+      -- The topline should have been adjusted so the cursor at line 100
+      -- is within the visible area above the terminal
+      local topline_after = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview().topline
+      end)
+
+      -- Compute the visible area above the terminal
+      local win_height = vim.api.nvim_win_get_height(editor_win)
+      local term_height = math.floor(vim.o.lines * 0.16)
+      local term_row = vim.o.lines - term_height - 2
+      local win_pos = vim.api.nvim_win_get_position(editor_win)
+      local visible_above_terminal = term_row - win_pos[1]
+
+      if win_height > visible_above_terminal then
+        -- Terminal overlaps the editor, so viewport should have scrolled
+        assert.are_not.equal(topline_before, topline_after)
+        -- Cursor should be within the visible area above the terminal
+        assert.is_true(cursor[1] >= topline_after)
+        assert.is_true(cursor[1] <= topline_after + visible_above_terminal - 1)
+      end
 
       -- Cleanup
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
       vim.api.nvim_buf_delete(test_buf, { force = true })
     end)
 
@@ -2058,6 +2078,9 @@ describe("termlet", function()
       assert.are.equal(initial_view.topline, after_view.topline)
 
       -- Cleanup
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
       vim.api.nvim_buf_delete(test_buf, { force = true })
     end)
 
@@ -2089,6 +2112,9 @@ describe("termlet", function()
       assert.are.equal(initial_view.topline, after_view.topline)
 
       -- Cleanup
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
       vim.api.nvim_buf_delete(test_buf, { force = true })
     end)
 
@@ -2113,6 +2139,9 @@ describe("termlet", function()
       assert.is_true(cursor[1] >= 1)
 
       -- Cleanup
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
       vim.api.nvim_buf_delete(test_buf, { force = true })
     end)
 
@@ -2142,16 +2171,16 @@ describe("termlet", function()
         vim.cmd("normal! zb")
       end)
 
-      local view_before = vim.api.nvim_win_call(editor_win, function()
-        return vim.fn.winsaveview()
+      local topline_before = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview().topline
       end)
 
       -- Open terminal
       local _buf, win = termlet.create_floating_terminal({})
       assert.is_not_nil(win)
 
-      local view_after = vim.api.nvim_win_call(editor_win, function()
-        return vim.fn.winsaveview()
+      local topline_after = vim.api.nvim_win_call(editor_win, function()
+        return vim.fn.winsaveview().topline
       end)
 
       -- The topline should have been adjusted (scrolled) so the cursor at line 200
@@ -2159,19 +2188,31 @@ describe("termlet", function()
       -- With a 30% height terminal at the bottom, the topline should be different
       -- from the original if the cursor was in the overlap zone
       local win_height = vim.api.nvim_win_get_height(editor_win)
-      local term_config = { height_ratio = 0.3 }
-      local term_height = math.floor(vim.o.lines * term_config.height_ratio)
+      local term_height = math.floor(vim.o.lines * 0.3)
       local term_row = vim.o.lines - term_height - 2
       local win_pos = vim.api.nvim_win_get_position(editor_win)
       local visible_above_terminal = term_row - win_pos[1]
 
-      if win_height > visible_above_terminal then
-        -- Terminal overlaps the editor window, so viewport should have adjusted
-        -- Cursor at line 200 should still be reachable
-        assert.are.equal(200, vim.api.nvim_win_get_cursor(editor_win)[1])
-      end
+      -- Ensure the test precondition is met: terminal must overlap the editor window
+      assert.is_true(
+        win_height > visible_above_terminal,
+        "Test precondition failed: terminal does not overlap editor window "
+          .. "(win_height="
+          .. win_height
+          .. ", visible_above="
+          .. visible_above_terminal
+          .. ")"
+      )
+
+      -- Viewport should have been adjusted: topline should differ from before
+      assert.are_not.equal(topline_before, topline_after)
+      -- Cursor at line 200 should still be reachable
+      assert.are.equal(200, vim.api.nvim_win_get_cursor(editor_win)[1])
 
       -- Cleanup
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
       vim.api.nvim_buf_delete(test_buf, { force = true })
     end)
   end)

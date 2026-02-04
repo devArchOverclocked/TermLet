@@ -279,14 +279,11 @@ local function adjust_viewport_for_terminal(term_row, float_win)
           local buf = vim.api.nvim_win_get_buf(win)
           local total_lines = vim.api.nvim_buf_line_count(buf)
 
-          -- If the cursor or visible content extends past the safe zone,
-          -- scroll so the last visible line above the terminal shows the last
-          -- content line that would otherwise be hidden.
+          -- If the window is taller than the visible area above the terminal,
+          -- lines below the safe zone are hidden. Scroll to keep the cursor visible.
           local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
-          local last_visible_line = current_topline + win_height - 1
 
-          -- Check if lines past the safe zone are in use
-          if last_visible_line > current_topline + visible_lines - 1 then
+          if win_height > visible_lines then
             -- Calculate the ideal topline: ensure the cursor stays visible
             -- while not showing lines below the terminal overlap zone
             local max_topline = total_lines - visible_lines + 1
@@ -440,7 +437,7 @@ function M.create_floating_terminal(opts)
   })
 
   -- Adjust editor viewports so the bottom-positioned terminal does not overlap file content
-  if term_config.position == "bottom" or not term_config.position then
+  if term_config.position == "bottom" then
     adjust_viewport_for_terminal(win_opts.row, win)
   end
 
