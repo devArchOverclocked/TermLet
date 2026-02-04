@@ -690,11 +690,26 @@ local function execute_script(script)
       if config.stacktrace.enabled then
         stacktrace.process_terminal_output(data, cwd, buf)
       end
-      -- Collect output for history stacktrace display
+      -- Collect output for history stacktrace display (capped to prevent unbounded memory)
       if config.history.enabled and data then
+        local max_output_lines = 1000
+        local strip = type(stacktrace.strip_ansi) == "function" and stacktrace.strip_ansi
+          or function(s)
+            return s:gsub("\27%[[?>=]*[%d;]*[A-Za-z@]", "")
+          end
         for _, line in ipairs(data) do
           if line and line ~= "" then
-            table.insert(collected_output, stacktrace.strip_ansi(line))
+            table.insert(collected_output, strip(line))
+          end
+        end
+        -- Keep only the last max_output_lines (tail is most relevant for stacktraces)
+        if #collected_output > max_output_lines then
+          local start = #collected_output - max_output_lines + 1
+          for i = 1, max_output_lines do
+            collected_output[i] = collected_output[start + i - 1]
+          end
+          for i = max_output_lines + 1, #collected_output do
+            collected_output[i] = nil
           end
         end
       end

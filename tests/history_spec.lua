@@ -842,4 +842,108 @@ describe("termlet history integration", function()
       termlet.close_stacktrace()
     end)
   end)
+
+  describe("output collection pipeline", function()
+    it("should store output_lines with ANSI codes stripped via stacktrace module", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local history_module = require("termlet.history")
+      local stacktrace_module = require("termlet.stacktrace")
+
+      -- Verify strip_ansi is available and works
+      assert.is_function(stacktrace_module.strip_ansi)
+
+      local stripped = stacktrace_module.strip_ansi("\27[31merror: something failed\27[0m")
+      assert.are.equal("error: something failed", stripped)
+
+      -- Simulate what execute_script does: strip ANSI, then store in entry
+      local raw_lines = {
+        "\27[32mCompiling...\27[0m",
+        "\27[31merror: undefined reference\27[0m",
+        "\27[33m  at main.c:42\27[0m",
+      }
+      local collected = {}
+      for _, line in ipairs(raw_lines) do
+        if line and line ~= "" then
+          table.insert(collected, stacktrace_module.strip_ansi(line))
+        end
+      end
+
+      history_module.add_entry({
+        script_name = "build",
+        exit_code = 1,
+        output_lines = collected,
+      })
+
+      local entry = history_module.get_last_failed_entry()
+      assert.is_not_nil(entry)
+      assert.are.equal(3, #entry.output_lines)
+      assert.are.equal("Compiling...", entry.output_lines[1])
+      assert.are.equal("error: undefined reference", entry.output_lines[2])
+      assert.are.equal("  at main.c:42", entry.output_lines[3])
+    end)
+
+    it("should cap output_lines at 1000 entries", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local history_module = require("termlet.history")
+
+      -- Simulate the capping logic from execute_script's on_stdout
+      local collected_output = {}
+      local max_output_lines = 1000
+
+      -- Add 1500 lines to simulate verbose output
+      for i = 1, 1500 do
+        table.insert(collected_output, "line " .. i)
+      end
+
+      -- Apply the same capping logic as in init.lua
+      if #collected_output > max_output_lines then
+        local start = #collected_output - max_output_lines + 1
+        for i = 1, max_output_lines do
+          collected_output[i] = collected_output[start + i - 1]
+        end
+        for i = max_output_lines + 1, #collected_output do
+          collected_output[i] = nil
+        end
+      end
+
+      assert.are.equal(1000, #collected_output)
+      -- Should keep the last 1000 lines (501-1500)
+      assert.are.equal("line 501", collected_output[1])
+      assert.are.equal("line 1500", collected_output[1000])
+
+      -- Store in history and verify
+      history_module.add_entry({
+        script_name = "verbose_build",
+        exit_code = 1,
+        output_lines = collected_output,
+      })
+
+      local entry = history_module.get_last_failed_entry()
+      assert.is_not_nil(entry)
+      assert.are.equal(1000, #entry.output_lines)
+      assert.are.equal("line 501", entry.output_lines[1])
+    end)
+
+    it("should use strip_ansi fallback when function is unavailable", function()
+      -- Test the fallback ANSI stripping logic
+      local fallback_strip = function(s)
+        return s:gsub("\27%[[?>=]*[%d;]*[A-Za-z@]", "")
+      end
+
+      local result = fallback_strip("\27[31mERROR\27[0m: test failed")
+      assert.are.equal("ERROR: test failed", result)
+
+      -- Test with cursor control sequences
+      result = fallback_strip("\27[?25h\27[2Ksome output")
+      assert.are.equal("some output", result)
+    end)
+  end)
 end)

@@ -11,6 +11,7 @@ local state = {
   win = nil,
   config = nil,
   rerun_callback = nil,
+  buf_leave_autocmd = nil, -- Autocmd ID for BufLeave on history buffer
   stacktrace_buf = nil, -- Buffer for stacktrace display
   stacktrace_win = nil, -- Window for stacktrace display
   stacktrace_entry = nil, -- Entry currently shown in stacktrace view
@@ -450,11 +451,17 @@ function M.show_stacktrace(entry, ui_config)
   vim.keymap.set("n", "q", M.close_stacktrace, buf_opts)
   vim.keymap.set("n", "<Esc>", M.close_stacktrace, buf_opts)
 
-  -- Auto-close on buffer leave
+  -- Auto-close on buffer leave and return to history if it's still open
   vim.api.nvim_create_autocmd("BufLeave", {
     buffer = state.stacktrace_buf,
     callback = function()
-      M.close_stacktrace()
+      vim.schedule(function()
+        M.close_stacktrace()
+        -- Return focus to history window if it's still open
+        if state.win and vim.api.nvim_win_is_valid(state.win) then
+          vim.api.nvim_set_current_win(state.win)
+        end
+      end)
     end,
     once = true,
   })
@@ -496,16 +503,17 @@ local function show_selected_stacktrace()
     return
   end
 
-  -- Close history UI first, then show stacktrace
-  M.close()
-
-  vim.schedule(function()
-    M.show_stacktrace(selected_entry, state.config)
-  end)
+  -- Capture config before any potential state changes
+  local cfg = state.config
+  M.show_stacktrace(selected_entry, cfg)
 end
 
 --- Close the history UI
 function M.close()
+  if state.buf_leave_autocmd then
+    pcall(vim.api.nvim_del_autocmd, state.buf_leave_autocmd)
+    state.buf_leave_autocmd = nil
+  end
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
   end
@@ -587,13 +595,18 @@ function M.open(rerun_callback, ui_config)
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
 
-  -- Auto-close on buffer leave
-  vim.api.nvim_create_autocmd("BufLeave", {
+  -- Auto-close on buffer leave, but not when switching to the stacktrace window
+  state.buf_leave_autocmd = vim.api.nvim_create_autocmd("BufLeave", {
     buffer = state.buf,
     callback = function()
-      M.close()
+      vim.schedule(function()
+        -- Don't close history if we switched to the stacktrace buffer
+        if M.is_stacktrace_open() then
+          return
+        end
+        M.close()
+      end)
     end,
-    once = true,
   })
 
   -- Set up keymaps
