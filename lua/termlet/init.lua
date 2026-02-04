@@ -21,6 +21,9 @@ local filter = require("termlet.filter")
 -- Load filter UI module
 local filter_ui = require("termlet.filter_ui")
 
+-- Load sharing module
+local sharing = require("termlet.sharing")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -99,6 +102,11 @@ local config = {
   history = {
     enabled = true, -- Enable execution history tracking
     max_entries = 50, -- Maximum number of history entries to keep
+  },
+  sharing = {
+    default_format = "json", -- "json" or "lua"
+    exclude_sensitive = true, -- Exclude sensitive fields (root_dir, cmd, etc.) from exports
+    sensitive_fields = { "root_dir", "search_dirs", "cmd", "on_stdout" },
   },
   debug = false,
 }
@@ -861,6 +869,49 @@ function M.setup(user_config)
 
   -- Apply saved keybindings
   apply_keybindings()
+
+  -- Register user commands for export/import
+  vim.api.nvim_create_user_command("TermLetExport", function(cmd_opts)
+    local args = cmd_opts.fargs
+    local filepath = args[1]
+    if not filepath or filepath == "" then
+      vim.notify("Usage: :TermLetExport <filepath> [--include-sensitive]", vim.log.levels.ERROR)
+      return
+    end
+    local export_opts = {}
+    for i = 2, #args do
+      if args[i] == "--include-sensitive" then
+        export_opts.exclude_sensitive = false
+      end
+    end
+    M.export_config(filepath, export_opts)
+  end, {
+    nargs = "+",
+    complete = "file",
+    desc = "Export TermLet script configuration to a file",
+  })
+
+  vim.api.nvim_create_user_command("TermLetImport", function(cmd_opts)
+    local args = cmd_opts.fargs
+    local filepath = args[1]
+    if not filepath or filepath == "" then
+      vim.notify("Usage: :TermLetImport <filepath> [--replace] [--preview]", vim.log.levels.ERROR)
+      return
+    end
+    local import_opts = {}
+    for i = 2, #args do
+      if args[i] == "--replace" then
+        import_opts.mode = "replace"
+      elseif args[i] == "--preview" then
+        import_opts.preview_only = true
+      end
+    end
+    M.import_config(filepath, import_opts)
+  end, {
+    nargs = "+",
+    complete = "file",
+    desc = "Import TermLet script configuration from a file",
+  })
 end
 
 -- Utility function to close all active terminals
@@ -1490,6 +1541,116 @@ function M.toggle_filter_ui()
 
   filter_ui.toggle(buf)
   return true
+end
+
+-- ============================================================================
+-- Sharing / Export-Import API
+-- ============================================================================
+
+--- Expose sharing module for advanced usage
+M.sharing = sharing
+
+--- Export current script configuration to a file
+---@param filepath string Output file path
+---@param opts table|nil Export options (format, exclude_sensitive, sensitive_fields)
+---@return boolean Success
+---@return string|nil Error message
+function M.export_config(filepath, opts)
+  if not config.scripts or #config.scripts == 0 then
+    vim.notify("No scripts configured to export", vim.log.levels.INFO)
+    return false, "No scripts configured"
+  end
+
+  opts = opts or {}
+  -- Apply sharing config defaults
+  if opts.exclude_sensitive == nil then
+    opts.exclude_sensitive = config.sharing.exclude_sensitive
+  end
+  if not opts.sensitive_fields then
+    opts.sensitive_fields = config.sharing.sensitive_fields
+  end
+  if not opts.format then
+    opts.format = nil -- Let export_to_file auto-detect from extension
+  end
+
+  local ok, err = sharing.export_to_file(config.scripts, filepath, opts)
+  if ok then
+    vim.notify("Exported " .. #config.scripts .. " script(s) to " .. filepath, vim.log.levels.INFO)
+  else
+    vim.notify("Export failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+  end
+  return ok, err
+end
+
+--- Import script configuration from a file with preview
+---@param filepath string Input file path
+---@param opts table|nil Import options (mode: "merge"|"replace", preview_only: boolean)
+---@return boolean Success
+---@return string|nil Error message or preview text
+function M.import_config(filepath, opts)
+  opts = opts or {}
+  local mode = opts.mode or "merge"
+
+  -- Parse and validate the file
+  local data, err = sharing.import_from_file(filepath, opts)
+  if not data then
+    vim.notify("Import failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+    return false, err
+  end
+
+  -- Generate preview
+  local preview = sharing.preview_import(config.scripts, data.scripts, mode)
+  local preview_text = sharing.format_preview(preview)
+
+  -- If preview only, show preview and return
+  if opts.preview_only then
+    vim.notify(preview_text, vim.log.levels.INFO)
+    return true, preview_text
+  end
+
+  -- Show preview and confirm via vim.ui.select
+  local total_changes = #preview.added + #preview.updated + #preview.removed
+  if total_changes == 0 then
+    vim.notify("No changes to apply from import.", vim.log.levels.INFO)
+    return true, nil
+  end
+
+  -- Apply the import
+  config.scripts = sharing.merge_scripts(config.scripts, data.scripts, mode)
+
+  -- Re-run setup to apply new scripts
+  M.setup({ scripts = config.scripts })
+
+  vim.notify(
+    "Imported "
+      .. #data.scripts
+      .. " script(s) ("
+      .. #preview.added
+      .. " added, "
+      .. #preview.updated
+      .. " updated"
+      .. (mode == "replace" and ", " .. #preview.removed .. " removed" or "")
+      .. ")",
+    vim.log.levels.INFO
+  )
+  return true, nil
+end
+
+--- Preview what an import would do without applying changes
+---@param filepath string Input file path
+---@param opts table|nil Import options (mode: "merge"|"replace")
+---@return boolean Success
+---@return string|nil Preview text or error message
+function M.preview_import(filepath, opts)
+  opts = opts or {}
+  opts.preview_only = true
+  return M.import_config(filepath, opts)
+end
+
+--- Get the current scripts configuration (for programmatic export)
+---@return table Current scripts list
+function M.get_scripts()
+  return config.scripts or {}
 end
 
 return M
