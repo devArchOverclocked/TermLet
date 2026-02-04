@@ -29,6 +29,13 @@ describe("termlet.watch", function()
       assert.is_nil(("test.py"):match(pattern))
     end)
 
+    it("should match root-level files with double-star glob", function()
+      local pattern = watch.glob_to_pattern("**/*.lua")
+      assert.is_not_nil(("test.lua"):match(pattern))
+      assert.is_not_nil(("init.lua"):match(pattern))
+      assert.is_nil(("test.py"):match(pattern))
+    end)
+
     it("should handle patterns with directory components", function()
       local pattern = watch.glob_to_pattern("src/*.lua")
       assert.is_not_nil(("src/test.lua"):match(pattern))
@@ -132,6 +139,11 @@ describe("termlet.watch", function()
     it("should not trigger for non-matching file", function()
       local config = { patterns = { "**/*.lua" }, exclude = {} }
       assert.is_false(watch.should_trigger("src/test.py", config))
+    end)
+
+    it("should trigger for root-level file with double-star pattern", function()
+      local config = { patterns = { "**/*.lua" }, exclude = {} }
+      assert.is_true(watch.should_trigger("init.lua", config))
     end)
 
     it("should trigger when no patterns specified (match all)", function()

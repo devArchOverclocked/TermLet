@@ -1512,8 +1512,9 @@ end
 -- ============================================================================
 
 --- Find the root directory for a script (used for watch mode)
+--- Falls back to script.root_dir -> config.root_dir -> cwd
 ---@param script table Script configuration
----@return string|nil Root directory path
+---@return string Root directory path (always returns a valid string)
 local function resolve_script_root(script)
   if script.root_dir then
     local expanded = vim.fn.expand(script.root_dir)
@@ -1529,7 +1530,6 @@ local function resolve_script_root(script)
     end
   end
 
-  -- Fallback to current working directory
   return vim.fn.getcwd()
 end
 
@@ -1562,10 +1562,6 @@ function M.start_watch(script_name)
   }, script.watch or {})
 
   local root_dir = resolve_script_root(script)
-  if not root_dir then
-    vim.notify("Could not determine root directory for watch", vim.log.levels.ERROR)
-    return false
-  end
 
   return watch.start(script_name, script, watch_config, root_dir, function(s)
     execute_script(s)

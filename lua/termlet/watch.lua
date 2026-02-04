@@ -29,12 +29,13 @@ function M.glob_to_pattern(glob)
   local len = #glob
   while i <= len do
     if glob:sub(i, i + 1) == "**" then
-      table.insert(parts, { type = "doublestar" })
       i = i + 2
-      -- Skip trailing / after ** (e.g., **/ in **/node_modules/**)
-      if i <= len and glob:sub(i, i) == "/" then
+      -- Check if ** is followed by / (e.g., **/ in **/node_modules/**)
+      local has_slash = i <= len and glob:sub(i, i) == "/"
+      if has_slash then
         i = i + 1
       end
+      table.insert(parts, { type = "doublestar", has_trailing_slash = has_slash })
     elseif glob:sub(i, i) == "*" then
       table.insert(parts, { type = "star" })
       i = i + 1
@@ -55,7 +56,15 @@ function M.glob_to_pattern(glob)
   local result = {}
   for _, part in ipairs(parts) do
     if part.type == "doublestar" then
-      table.insert(result, ".*")
+      if part.has_trailing_slash then
+        -- ** followed by / matches zero or more path segments
+        -- e.g., **/*.lua should match both "test.lua" and "src/test.lua"
+        -- .*  greedily matches any chars (including /), /? optionally matches the separator
+        table.insert(result, ".*/?")
+      else
+        -- ** at end of pattern matches anything remaining
+        table.insert(result, ".*")
+      end
     elseif part.type == "star" then
       table.insert(result, "[^/]*")
     elseif part.type == "question" then
