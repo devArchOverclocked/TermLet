@@ -807,6 +807,8 @@ function M.open(scripts, on_save, ui_config)
   vim.wo[state.win].number = false
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
+  -- Hide cursor block in floating window by blending Cursor with Normal
+  vim.wo[state.win].winhighlight = "Cursor:Normal"
 
   -- Auto-close on buffer leave
   vim.api.nvim_create_autocmd("BufLeave", {

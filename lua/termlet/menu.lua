@@ -73,17 +73,20 @@ end
 ---@param width number Available width for the line
 ---@return string Formatted line
 ---@return table[] Inline highlights for this line {col_start, col_end, group}
-local function format_script_line(script, index, is_selected, width)
+local function format_script_line(script, index, is_selected, width, total_count)
   local pointer = is_selected and "  " or "   "
   local idx_str = string.format(" %d. ", index)
   local name = script.name or "unnamed"
   local description = script.description or ""
 
-  -- Calculate column widths
-  local name_width = math.min(#name, math.floor(width * 0.35))
+  -- Use fixed column widths for consistent alignment across all rows
+  local name_width = math.floor(width * 0.35)
+  -- Calculate fixed prefix width: pointer(3) + max idx_str width
+  local max_idx_width = #string.format(" %d. ", total_count)
+  local prefix_pad = max_idx_width - #idx_str
   local padded_name = string.format("%-" .. name_width .. "s", name:sub(1, name_width))
 
-  local line = pointer .. idx_str .. padded_name
+  local line = pointer .. idx_str .. string.rep(" ", prefix_pad) .. padded_name
 
   local inline_hl = {}
 
@@ -198,8 +201,12 @@ local function render_menu()
       end
       table.insert(lines, "")
     else
-      -- Column header
-      local header = string.format("   %-" .. math.floor(width * 0.35) .. "s  %s", "    Script", "Description")
+      -- Column header - align with data row prefix (pointer + idx_str + padding)
+      local name_width = math.floor(width * 0.35)
+      local max_idx_width = #string.format(" %d. ", #state.filtered_scripts)
+      -- Header prefix: "   " (3, matches unselected pointer) + spaces for idx column
+      local header_prefix = "   " .. string.rep(" ", max_idx_width)
+      local header = header_prefix .. string.format("%-" .. name_width .. "s", "Script") .. "  " .. "Description"
       table.insert(lines, header)
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
 
@@ -208,9 +215,10 @@ local function render_menu()
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
 
       -- Script entries
+      local total_count = #state.filtered_scripts
       for i, script in ipairs(state.filtered_scripts) do
         local is_selected = (i == state.selected_index)
-        local line, inline_hl = format_script_line(script, i, is_selected, width)
+        local line, inline_hl = format_script_line(script, i, is_selected, width, total_count)
         table.insert(lines, line)
 
         local line_idx = #lines - 1
@@ -538,6 +546,8 @@ function M.open(scripts, execute_callback, menu_config)
   vim.wo[state.win].number = false
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
+  -- Hide cursor block in floating window by blending Cursor with Normal
+  vim.wo[state.win].winhighlight = "Cursor:Normal"
 
   -- Auto-close on buffer leave
   vim.api.nvim_create_autocmd("BufLeave", {

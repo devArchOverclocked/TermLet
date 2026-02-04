@@ -256,6 +256,8 @@ function M.open(target_buf)
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
+  -- Hide cursor block in floating window by blending Cursor with Normal
+  vim.wo[win].winhighlight = "Cursor:Normal"
 
   -- Setup UI (render_ui handles modifiable toggle internally)
   render_ui()
