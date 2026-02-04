@@ -119,9 +119,10 @@ end
 ---@param index number Index in the list
 ---@param is_selected boolean Whether this entry is selected
 ---@param width number Available width for the line
+---@param total_count number Total number of scripts (for index column alignment)
 ---@return string Formatted line
 ---@return table[] Inline highlight info
-local function format_keybinding_line(script, keybinding, index, is_selected, width)
+local function format_keybinding_line(script, keybinding, index, is_selected, width, total_count)
   local pointer = is_selected and "  " or "   "
   local idx_str = string.format(" %d. ", index)
   local name = script.name or "unnamed"
@@ -129,6 +130,10 @@ local function format_keybinding_line(script, keybinding, index, is_selected, wi
   -- Calculate column widths (must match header in render_ui)
   local name_width = math.floor(width * 0.35)
   local key_width = math.floor(width * 0.25)
+
+  -- Calculate padding for consistent index column width (same pattern as menu.lua)
+  local max_idx_width = #string.format(" %d. ", total_count)
+  local prefix_pad = max_idx_width - #idx_str
 
   -- Format all columns with string.format for consistent alignment
   local padded_name = string.format("%-" .. name_width .. "s", name:sub(1, name_width))
@@ -141,12 +146,12 @@ local function format_keybinding_line(script, keybinding, index, is_selected, wi
   end
   local padded_key = string.format("%-" .. key_width .. "s", key_display:sub(1, key_width))
 
-  local line = pointer .. idx_str .. padded_name .. "  " .. padded_key
+  local line = pointer .. idx_str .. string.rep(" ", prefix_pad) .. padded_name .. "  " .. padded_key
 
   local inline_hl = {}
 
   -- Track key column for inline highlighting
-  local key_start = #pointer + #idx_str + name_width + 2
+  local key_start = #pointer + #idx_str + prefix_pad + name_width + 2
   local key_end = key_start + #padded_key
   if keybinding and keybinding ~= "" then
     table.insert(inline_hl, { col_start = key_start, col_end = key_end, group = "keybinding" })
@@ -235,8 +240,11 @@ local function render_ui()
     -- Header - use same column widths as data rows for alignment
     local name_width = math.floor(width * 0.35)
     local key_width = math.floor(width * 0.25)
-    local header = "   "
-      .. string.format("     %-" .. name_width .. "s", "Script")
+    -- Calculate max index width to match data row prefix (same pattern as menu.lua)
+    local max_idx_width = #string.format(" %d. ", #state.scripts)
+    local header_prefix = "   " .. string.rep(" ", max_idx_width)
+    local header = header_prefix
+      .. string.format("%-" .. name_width .. "s", "Script")
       .. "  "
       .. string.format("%-" .. key_width .. "s", "Keybinding")
     table.insert(lines, header)
@@ -254,7 +262,7 @@ local function render_ui()
       for i, script in ipairs(state.scripts) do
         local is_selected = (i == state.selected_index)
         local keybinding = state.keybindings[script.name]
-        local line, inline_hl = format_keybinding_line(script, keybinding, i, is_selected, width)
+        local line, inline_hl = format_keybinding_line(script, keybinding, i, is_selected, width, #state.scripts)
         table.insert(lines, line)
 
         local line_idx = #lines - 1
