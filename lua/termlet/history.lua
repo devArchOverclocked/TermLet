@@ -545,7 +545,9 @@ end
 function M.close()
   -- Clean up the BufLeave augroup to prevent stale callbacks
   pcall(vim.api.nvim_del_augroup_by_name, "termlet_history_buf_leave")
-  M.close_stacktrace()
+  -- Hide (not close) the stacktrace so toggle_stacktrace() can reopen it later.
+  -- close_stacktrace() would clear last_stacktrace_entry, making toggle inoperable.
+  M.hide_stacktrace()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
   end

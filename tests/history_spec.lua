@@ -512,6 +512,98 @@ describe("termlet.history", function()
       assert.is_false(history.is_open())
       assert.is_false(history.is_stacktrace_open())
     end)
+
+    it("should preserve last_stacktrace_entry after close", function()
+      history.add_entry({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error output" },
+      })
+      history.open(function() end)
+
+      -- Open stacktrace viewer
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error output" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Close history UI — should preserve entry for toggle
+      history.close()
+      assert.is_false(history.is_open())
+      assert.is_false(history.is_stacktrace_open())
+      -- Entry should be preserved so toggle_stacktrace can reopen
+      assert.is_not_nil(history.get_last_stacktrace_entry())
+      assert.is_true(history.has_hidden_stacktrace())
+    end)
+
+    it("should allow toggle_stacktrace after close", function()
+      history.add_entry({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error line 1", "error line 2" },
+      })
+      history.open(function() end)
+
+      -- Open stacktrace viewer
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error line 1", "error line 2" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Close the history UI (user presses q or Esc)
+      history.close()
+      assert.is_false(history.is_open())
+      assert.is_false(history.is_stacktrace_open())
+
+      -- toggle_stacktrace should reopen the stacktrace
+      local visible = history.toggle_stacktrace()
+      assert.is_true(visible)
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Content should be preserved
+      local buf = history._get_stacktrace_buf()
+      assert.is_not_nil(buf)
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(2, #lines)
+      assert.are.equal("error line 1", lines[1])
+      assert.are.equal("error line 2", lines[2])
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should allow multiple toggle cycles after close", function()
+      history.add_entry({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      history.open(function() end)
+
+      history.show_output({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+
+      -- Close the history UI
+      history.close()
+
+      -- Toggle should work multiple times
+      for _ = 1, 3 do
+        local visible = history.toggle_stacktrace()
+        assert.is_true(visible)
+        assert.is_true(history.is_stacktrace_open())
+
+        visible = history.toggle_stacktrace()
+        assert.is_false(visible)
+        assert.is_false(history.is_stacktrace_open())
+      end
+    end)
   end)
 
   describe("open with stacktrace_callback", function()
@@ -1327,6 +1419,89 @@ describe("termlet history integration", function()
 
       -- Clean up
       termlet.history.close_stacktrace()
+    end)
+
+    it("should work after history UI is closed", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+        stacktrace = { enabled = true },
+      })
+
+      -- Add a failed entry to history
+      termlet.history.add_entry({
+        script_name = "failing_test",
+        exit_code = 1,
+        execution_time = 0.5,
+        timestamp = os.time(),
+        working_dir = "/tmp",
+        output_lines = { "Running tests...", "FAIL: test_example", "Error at line 42" },
+      })
+
+      -- Open history UI with stacktrace callback (simulates show_history)
+      termlet.history.open(function() end, nil, function(entry)
+        termlet.show_history_stacktrace(entry)
+      end)
+      assert.is_true(termlet.history.is_open())
+
+      -- Show stacktrace for the entry
+      termlet.show_history_stacktrace({
+        script_name = "failing_test",
+        exit_code = 1,
+        working_dir = "/tmp",
+        output_lines = { "Running tests...", "FAIL: test_example", "Error at line 42" },
+      })
+      assert.is_true(termlet.history.is_stacktrace_open())
+
+      -- Close the history UI (user presses q/Esc)
+      termlet.close_history()
+      assert.is_false(termlet.history.is_open())
+      assert.is_false(termlet.history.is_stacktrace_open())
+
+      -- toggle_stacktrace should reopen the stacktrace from wherever
+      local visible = termlet.toggle_stacktrace()
+      assert.is_true(visible)
+      assert.is_true(termlet.history.is_stacktrace_open())
+
+      -- Clean up
+      termlet.history.close_stacktrace()
+    end)
+
+    it("should toggle multiple times after history UI close", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+        stacktrace = { enabled = true },
+      })
+
+      termlet.history.add_entry({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+
+      termlet.history.open(function() end, nil, function(entry)
+        termlet.show_history_stacktrace(entry)
+      end)
+
+      termlet.show_history_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+        working_dir = "/tmp",
+        output_lines = { "error" },
+      })
+
+      -- Close the history UI
+      termlet.close_history()
+
+      -- Toggle should work multiple times
+      for _ = 1, 3 do
+        local visible = termlet.toggle_stacktrace()
+        assert.is_true(visible)
+
+        visible = termlet.toggle_stacktrace()
+        assert.is_false(visible)
+      end
     end)
   end)
 end)
