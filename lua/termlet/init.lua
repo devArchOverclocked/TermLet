@@ -21,6 +21,9 @@ local filter = require("termlet.filter")
 -- Load filter UI module
 local filter_ui = require("termlet.filter_ui")
 
+-- Load watch module
+local watch = require("termlet.watch")
+
 -- Default configuration
 local config = {
   scripts = {},
@@ -99,6 +102,10 @@ local config = {
   history = {
     enabled = true, -- Enable execution history tracking
     max_entries = 50, -- Maximum number of history entries to keep
+  },
+  watch = {
+    debounce = 500, -- Default debounce ms for all watch configs
+    exclude = { "node_modules", ".git", ".svn", "dist", "build", "target", "__pycache__" },
   },
   debug = false,
 }
@@ -804,6 +811,17 @@ function M.setup(user_config)
   -- Initialize filter module with configuration
   filter.setup(config.terminal.filters)
 
+  -- Initialize watch module
+  watch.set_execute_callback(execute_script)
+  watch.set_debug_log(debug_log)
+
+  -- Clean up watch handles on Neovim exit
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    callback = function()
+      watch.stop_all()
+    end,
+  })
+
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
     vim.notify("Invalid scripts configuration", vim.log.levels.ERROR)
@@ -1491,5 +1509,100 @@ function M.toggle_filter_ui()
   filter_ui.toggle(buf)
   return true
 end
+
+-- ============================================================================
+-- Watch Mode API
+-- ============================================================================
+
+--- Start watch mode for a script by name
+---@param script_name string Name of the script
+---@return boolean Success
+function M.start_watch(script_name)
+  if not script_name then
+    vim.notify("[TermLet] Script name required for watch mode", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Find the script in config
+  local target_script = nil
+  for _, script in ipairs(config.scripts) do
+    if script.name == script_name then
+      target_script = script
+      break
+    end
+  end
+
+  if not target_script then
+    vim.notify("[TermLet] Script '" .. script_name .. "' not found", vim.log.levels.ERROR)
+    return false
+  end
+
+  local watch_config = vim.tbl_deep_extend("force", config.watch or {}, target_script.watch or {})
+
+  if not watch_config.patterns or #watch_config.patterns == 0 then
+    vim.notify(
+      "[TermLet] No watch patterns configured for '" .. script_name .. "'. Add a 'watch' section to the script config.",
+      vim.log.levels.WARN
+    )
+    return false
+  end
+
+  local root = target_script.root_dir or config.root_dir
+  if not root then
+    vim.notify(
+      "[TermLet] No root_dir configured for '" .. script_name .. "'. Watch mode needs a root directory.",
+      vim.log.levels.ERROR
+    )
+    return false
+  end
+
+  return watch.start(script_name, target_script, watch_config, root)
+end
+
+--- Stop watch mode for a script by name
+---@param script_name string Name of the script
+function M.stop_watch(script_name)
+  watch.stop(script_name)
+  vim.notify("[TermLet] Watch mode stopped for '" .. script_name .. "'", vim.log.levels.INFO)
+end
+
+--- Toggle watch mode for a script by name
+---@param script_name string Name of the script
+---@return boolean new_state true if now watching, false if stopped
+function M.toggle_watch(script_name)
+  if not script_name then
+    vim.notify("[TermLet] Script name required for watch mode", vim.log.levels.ERROR)
+    return false
+  end
+
+  if watch.is_watching(script_name) then
+    M.stop_watch(script_name)
+    return false
+  else
+    return M.start_watch(script_name)
+  end
+end
+
+--- Check if a script is being watched
+---@param script_name string Name of the script
+---@return boolean
+function M.is_watching(script_name)
+  return watch.is_watching(script_name)
+end
+
+--- Get list of all scripts currently being watched
+---@return table List of script names
+function M.get_watched_scripts()
+  return watch.get_watched_scripts()
+end
+
+--- Stop all watch mode watchers
+function M.stop_all_watches()
+  watch.stop_all()
+  vim.notify("[TermLet] All watch mode watchers stopped", vim.log.levels.INFO)
+end
+
+--- Expose watch module for advanced usage
+M.watch = watch
 
 return M

@@ -16,15 +16,16 @@ local state = {
 -- Default history UI configuration
 local default_config = {
   width_ratio = 0.7,
-  height_ratio = 0.6,
+  height_ratio = 0.65,
   border = "rounded",
   title = " TermLet History ",
   highlight = {
     selected = "CursorLine",
     success = "DiagnosticOk",
     error = "DiagnosticError",
-    title = "Title",
+    header = "Title",
     help = "Comment",
+    counter = "NonText",
   },
 }
 
@@ -93,8 +94,8 @@ local function calculate_window_opts(config)
   local height = math.floor(vim.o.lines * config.height_ratio)
 
   -- Minimum dimensions
-  width = math.max(width, 60)
-  height = math.max(height, 15)
+  width = math.max(width, 64)
+  height = math.max(height, 16)
 
   local row = math.floor((vim.o.lines - height) / 2)
   local col = math.floor((vim.o.columns - width) / 2)
@@ -110,7 +111,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [Enter] Re-run  [c] Clear  [q] Close ",
+    footer = " Enter Re-run  c Clear  q Close ",
     footer_pos = "center",
   }
 end
@@ -140,17 +141,21 @@ end
 
 --- Format a history entry for display
 ---@param entry table History entry
+---@param index number Index in the list
 ---@param is_selected boolean Whether this entry is selected
+---@param width number Available width
 ---@return string Formatted line
-local function format_history_line(entry, is_selected)
-  local prefix = is_selected and "  > " or "    "
+---@return number status_icon_start Byte offset where status icon starts
+---@return number status_icon_end Byte offset where status icon ends
+local function format_history_line(entry, _index, is_selected, width)
+  local pointer = is_selected and "  " or "   "
 
   -- Status icon
-  local status_icon = entry.exit_code == 0 and "✓" or "✗"
+  local status_icon = entry.exit_code == 0 and " ✓ " or " ✗ "
 
   -- Script name (truncate if needed)
   local name = entry.script_name or "unknown"
-  local name_width = math.min(#name, 25)
+  local name_width = math.min(#name, 28)
   local display_name = name:sub(1, name_width)
   if #name > name_width then
     display_name = display_name:sub(1, name_width - 1) .. "…"
@@ -166,10 +171,17 @@ local function format_history_line(entry, is_selected)
   local exit_str = string.format("exit:%d", entry.exit_code or -1)
 
   -- Build the line
+  local icon_start = #pointer
   local line =
-    string.format("%s%s  %-25s  %8s  %8s  %s", prefix, status_icon, display_name, exec_time, exit_str, time_str)
+    string.format("%s%s %-28s  %8s  %8s  %s", pointer, status_icon, display_name, exec_time, exit_str, time_str)
+  local icon_end = icon_start + #status_icon
 
-  return line
+  -- Pad to full width for consistent highlight background
+  if #line < width then
+    line = line .. string.rep(" ", width - #line)
+  end
+
+  return line, icon_start, icon_end
 end
 
 --- Render the history UI
@@ -189,43 +201,54 @@ local function render_history()
 
   -- Add header
   table.insert(lines, "")
-  local header = string.format("  %s  %-25s  %8s  %8s  %s", " ", "Script", "Duration", "Exit", "Time")
+  local header = string.format("   %s  %-28s  %8s  %8s  %s", "   ", "Script", "Duration", "Exit", "Time")
   table.insert(lines, header)
-  table.insert(lines, "  " .. string.rep("─", width - 4))
+  table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+
+  local sep_line = "   " .. string.rep("─", width - 4)
+  table.insert(lines, sep_line)
+  table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
 
   -- Add history entries
   if #state.entries == 0 then
     table.insert(lines, "")
-    table.insert(lines, "    No history available")
+    table.insert(lines, "   No history available")
     table.insert(lines, "")
   else
     local selected_index = state.selected_index or 1
     for i, entry in ipairs(state.entries) do
       local is_selected = (i == selected_index)
-      local line = format_history_line(entry, is_selected)
+      local line, icon_start, icon_end = format_history_line(entry, i, is_selected, width)
       table.insert(lines, line)
 
+      local line_idx = #lines - 1
       if is_selected then
-        table.insert(highlights, { line = #lines - 1, group = state.config.highlight.selected })
+        table.insert(highlights, { line = line_idx, group = state.config.highlight.selected })
       end
 
-      -- Color-code by exit status
+      -- Color-code by exit status (status icon region)
       if entry.exit_code == 0 then
         table.insert(highlights, {
-          line = #lines - 1,
-          col_start = 4,
-          col_end = 7,
+          line = line_idx,
+          col_start = icon_start,
+          col_end = icon_end,
           group = state.config.highlight.success,
         })
       else
         table.insert(highlights, {
-          line = #lines - 1,
-          col_start = 4,
-          col_end = 7,
+          line = line_idx,
+          col_start = icon_start,
+          col_end = icon_end,
           group = state.config.highlight.error,
         })
       end
     end
+
+    -- Counter
+    table.insert(lines, "")
+    local counter_text = string.format("   %d entries", #state.entries)
+    table.insert(lines, counter_text)
+    table.insert(highlights, { line = #lines - 1, group = state.config.highlight.counter })
   end
 
   -- Pad to fill window
@@ -372,7 +395,13 @@ function M.open(rerun_callback, ui_config)
   -- Initialize state
   state.selected_index = 1
   state.rerun_callback = rerun_callback
-  state.config = vim.tbl_deep_extend("force", default_config, ui_config or {})
+  local merged_config = ui_config or {}
+  -- Backwards compatibility: migrate highlight.title to highlight.header
+  if merged_config.highlight and merged_config.highlight.title and not merged_config.highlight.header then
+    merged_config.highlight.header = merged_config.highlight.title
+    merged_config.highlight.title = nil
+  end
+  state.config = vim.tbl_deep_extend("force", default_config, merged_config)
 
   -- Create buffer
   state.buf = vim.api.nvim_create_buf(false, true)
@@ -403,6 +432,8 @@ function M.open(rerun_callback, ui_config)
   vim.wo[state.win].number = false
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
+  -- Hide cursor block in floating window by blending Cursor with Normal
+  vim.wo[state.win].winhighlight = "Cursor:Normal"
 
   -- Auto-close on buffer leave
   vim.api.nvim_create_autocmd("BufLeave", {

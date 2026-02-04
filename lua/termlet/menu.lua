@@ -20,14 +20,16 @@ local state = {
 -- Default menu configuration
 local default_config = {
   width_ratio = 0.6,
-  height_ratio = 0.5,
+  height_ratio = 0.6,
   border = "rounded",
   title = " TermLet Scripts ",
   highlight = {
     selected = "CursorLine",
-    title = "Title",
+    header = "Title",
     help = "Comment",
     search = "Search",
+    description = "Comment",
+    counter = "NonText",
   },
 }
 
@@ -42,8 +44,8 @@ local function calculate_window_opts(config)
   local height = math.floor(vim.o.lines * config.height_ratio)
 
   -- Minimum dimensions
-  width = math.max(width, 40)
-  height = math.max(height, 10)
+  width = math.max(width, 50)
+  height = math.max(height, 14)
 
   local row = math.floor((vim.o.lines - height) / 2)
   local col = math.floor((vim.o.columns - width) / 2)
@@ -59,7 +61,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [Enter] Run  [/] Search  [?] Help  [q] Close ",
+    footer = " Enter Run  / Search  ? Help  q Close ",
     footer_pos = "center",
   }
 end
@@ -70,48 +72,65 @@ end
 ---@param is_selected boolean Whether this script is selected
 ---@param width number Available width for the line
 ---@return string Formatted line
-local function format_script_line(script, _index, is_selected, width)
-  local prefix = is_selected and "  > " or "    "
+---@return table[] Inline highlights for this line {col_start, col_end, group}
+local function format_script_line(script, index, is_selected, width, total_count)
+  local pointer = is_selected and "  " or "   "
+  local idx_str = string.format(" %d. ", index)
   local name = script.name or "unnamed"
   local description = script.description or ""
 
-  -- Calculate space for description
-  local name_width = math.min(#name, math.floor(width * 0.4))
-  local padded_name = name:sub(1, name_width)
+  -- Use fixed column widths for consistent alignment across all rows
+  local name_width = math.floor(width * 0.35)
+  -- Calculate fixed prefix width: pointer(3) + max idx_str width
+  local max_idx_width = #string.format(" %d. ", total_count)
+  local prefix_pad = max_idx_width - #idx_str
+  local padded_name = string.format("%-" .. name_width .. "s", name:sub(1, name_width))
 
-  if #padded_name < name_width then
-    padded_name = padded_name .. string.rep(" ", name_width - #padded_name)
-  end
+  local line = pointer .. idx_str .. string.rep(" ", prefix_pad) .. padded_name
 
-  local line = prefix .. padded_name
+  local inline_hl = {}
 
   if description ~= "" then
-    local desc_width = width - #line - 4
+    local sep = "  "
+    local desc_width = width - #line - #sep - 2
     if desc_width > 0 then
       local truncated_desc = description:sub(1, desc_width)
-      line = line .. "  " .. truncated_desc
+      local desc_start = #line + #sep
+      line = line .. sep .. truncated_desc
+      table.insert(inline_hl, { col_start = desc_start, col_end = #line, group = "description" })
     end
   end
 
-  return line
+  -- Pad to full width for consistent highlight background
+  if #line < width then
+    line = line .. string.rep(" ", width - #line)
+  end
+
+  return line, inline_hl
 end
 
 --- Get the help text lines
+---@param width number Available width
 ---@return table List of help text lines
-local function get_help_lines()
+local function get_help_lines(width)
+  local sep = "   " .. string.rep("─", math.max(width - 6, 30))
   return {
     "",
-    "  Keybindings:",
-    "  ────────────────────────────────",
-    "  j / ↓        Move down",
-    "  k / ↑        Move up",
-    "  Enter        Run selected script",
-    "  /            Search/filter scripts",
-    "  Escape       Cancel search / Close menu",
-    "  q            Close menu",
-    "  ?            Toggle this help",
-    "  gg           Go to first script",
-    "  G            Go to last script",
+    "   Keyboard Shortcuts",
+    sep,
+    "",
+    "   Navigation",
+    "   j / Down        Move down",
+    "   k / Up          Move up",
+    "   gg              Go to first script",
+    "   G               Go to last script",
+    "",
+    "   Actions",
+    "   Enter           Run selected script",
+    "   /               Search / filter scripts",
+    "   Esc             Cancel search / close",
+    "   q               Close menu",
+    "   ?               Toggle this help",
     "",
   }
 end
@@ -157,17 +176,18 @@ local function render_menu()
 
   -- Add search bar if in search mode
   if state.search_mode then
-    local search_line = "  Search: " .. state.search_query .. "█"
+    table.insert(lines, "")
+    local search_line = "   / " .. state.search_query .. "█"
     table.insert(lines, search_line)
     table.insert(lines, "")
-    table.insert(highlights, { line = 0, group = state.config.highlight.search })
+    table.insert(highlights, { line = 1, group = state.config.highlight.search })
   else
     table.insert(lines, "")
   end
 
   -- Add script list or help
   if state.show_help then
-    for _, help_line in ipairs(get_help_lines()) do
+    for _, help_line in ipairs(get_help_lines(width)) do
       table.insert(lines, help_line)
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.help })
     end
@@ -175,21 +195,62 @@ local function render_menu()
     if #state.filtered_scripts == 0 then
       table.insert(lines, "")
       if state.search_query ~= "" then
-        table.insert(lines, "    No scripts match your search")
+        table.insert(lines, "   No scripts match your search")
       else
-        table.insert(lines, "    No scripts configured")
+        table.insert(lines, "   No scripts configured")
       end
       table.insert(lines, "")
     else
+      -- Column header - align with data row prefix (pointer + idx_str + padding)
+      local name_width = math.floor(width * 0.35)
+      local max_idx_width = #string.format(" %d. ", #state.filtered_scripts)
+      -- Header prefix: "   " (3, matches unselected pointer) + spaces for idx column
+      local header_prefix = "   " .. string.rep(" ", max_idx_width)
+      local header = header_prefix .. string.format("%-" .. name_width .. "s", "Script") .. "  " .. "Description"
+      table.insert(lines, header)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+
+      local sep_line = "   " .. string.rep("─", width - 4)
+      table.insert(lines, sep_line)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+
+      -- Script entries
+      local total_count = #state.filtered_scripts
       for i, script in ipairs(state.filtered_scripts) do
         local is_selected = (i == state.selected_index)
-        local line = format_script_line(script, i, is_selected, width)
+        local line, inline_hl = format_script_line(script, i, is_selected, width, total_count)
         table.insert(lines, line)
 
+        local line_idx = #lines - 1
         if is_selected then
-          table.insert(highlights, { line = #lines - 1, group = state.config.highlight.selected })
+          table.insert(highlights, { line = line_idx, group = state.config.highlight.selected })
+        end
+
+        -- Apply inline description highlights (only when not selected, to avoid overriding)
+        if not is_selected then
+          for _, ihl in ipairs(inline_hl) do
+            table.insert(highlights, {
+              line = line_idx,
+              col_start = ihl.col_start,
+              col_end = ihl.col_end,
+              group = state.config.highlight[ihl.group] or state.config.highlight.description,
+            })
+          end
         end
       end
+    end
+
+    -- Counter line at the bottom
+    if #state.filtered_scripts > 0 then
+      table.insert(lines, "")
+      local counter_text
+      if state.search_query ~= "" then
+        counter_text = string.format("   %d of %d scripts (filtered)", #state.filtered_scripts, #state.scripts)
+      else
+        counter_text = string.format("   %d scripts", #state.scripts)
+      end
+      table.insert(lines, counter_text)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.counter })
     end
   end
 
@@ -206,7 +267,11 @@ local function render_menu()
 
   -- Apply highlights
   for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+    if hl.col_start and hl.col_end then
+      vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, hl.col_start, hl.col_end)
+    else
+      vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+    end
   end
 end
 
@@ -444,7 +509,13 @@ function M.open(scripts, execute_callback, menu_config)
   state.search_mode = false
   state.show_help = false
   state.execute_callback = execute_callback
-  state.config = vim.tbl_deep_extend("force", default_config, menu_config or {})
+  local merged_config = menu_config or {}
+  -- Backwards compatibility: migrate highlight.title to highlight.header
+  if merged_config.highlight and merged_config.highlight.title and not merged_config.highlight.header then
+    merged_config.highlight.header = merged_config.highlight.title
+    merged_config.highlight.title = nil
+  end
+  state.config = vim.tbl_deep_extend("force", default_config, merged_config)
 
   -- Create buffer
   state.buf = vim.api.nvim_create_buf(false, true)
@@ -475,6 +546,8 @@ function M.open(scripts, execute_callback, menu_config)
   vim.wo[state.win].number = false
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
+  -- Hide cursor block in floating window by blending Cursor with Normal
+  vim.wo[state.win].winhighlight = "Cursor:Normal"
 
   -- Auto-close on buffer leave
   vim.api.nvim_create_autocmd("BufLeave", {
