@@ -377,6 +377,235 @@ describe("termlet.history", function()
       assert.are.equal(10, #entries)
     end)
   end)
+
+  describe("get_last_failed_entry", function()
+    it("should return nil when history is empty", function()
+      local entry = history.get_last_failed_entry()
+      assert.is_nil(entry)
+    end)
+
+    it("should return nil when all entries succeeded", function()
+      history.add_entry({ script_name = "build", exit_code = 0, output_lines = { "ok" } })
+      history.add_entry({ script_name = "test", exit_code = 0, output_lines = { "passed" } })
+
+      local entry = history.get_last_failed_entry()
+      assert.is_nil(entry)
+    end)
+
+    it("should return the most recent failed entry with output", function()
+      history.add_entry({
+        script_name = "first_fail",
+        exit_code = 1,
+        output_lines = { "error: first" },
+      })
+      history.add_entry({
+        script_name = "success",
+        exit_code = 0,
+        output_lines = { "ok" },
+      })
+      history.add_entry({
+        script_name = "second_fail",
+        exit_code = 2,
+        output_lines = { "error: second" },
+      })
+
+      local entry = history.get_last_failed_entry()
+      assert.is_not_nil(entry)
+      assert.are.equal("second_fail", entry.script_name)
+      assert.are.equal(2, entry.exit_code)
+    end)
+
+    it("should skip failed entries without output_lines", function()
+      history.add_entry({
+        script_name = "no_output_fail",
+        exit_code = 1,
+      })
+      history.add_entry({
+        script_name = "with_output_fail",
+        exit_code = 1,
+        output_lines = { "traceback line 1", "traceback line 2" },
+      })
+
+      -- The entry with output should come first (most recent)
+      local entry = history.get_last_failed_entry()
+      assert.is_not_nil(entry)
+      assert.are.equal("with_output_fail", entry.script_name)
+    end)
+
+    it("should skip failed entries with empty output_lines", function()
+      history.add_entry({
+        script_name = "empty_output",
+        exit_code = 1,
+        output_lines = {},
+      })
+
+      local entry = history.get_last_failed_entry()
+      assert.is_nil(entry)
+    end)
+  end)
+
+  describe("show_stacktrace", function()
+    it("should return false when entry is nil", function()
+      local result = history.show_stacktrace(nil)
+      assert.is_false(result)
+    end)
+
+    it("should return false when entry has no output_lines", function()
+      local result = history.show_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+      })
+      assert.is_false(result)
+    end)
+
+    it("should return false when entry has empty output_lines", function()
+      local result = history.show_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = {},
+      })
+      assert.is_false(result)
+    end)
+
+    it("should return false when entry succeeded (exit_code 0)", function()
+      local result = history.show_stacktrace({
+        script_name = "test",
+        exit_code = 0,
+        output_lines = { "some output" },
+      })
+      assert.is_false(result)
+    end)
+
+    it("should open stacktrace window for failed entry with output", function()
+      local result = history.show_stacktrace({
+        script_name = "failing_script",
+        exit_code = 1,
+        output_lines = {
+          "Traceback (most recent call last):",
+          '  File "test.py", line 10, in main',
+          "    raise ValueError('bad value')",
+          "ValueError: bad value",
+        },
+      })
+      assert.is_true(result)
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+
+    it("should close existing stacktrace window when opening new one", function()
+      history.show_stacktrace({
+        script_name = "first",
+        exit_code = 1,
+        output_lines = { "error 1" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      history.show_stacktrace({
+        script_name = "second",
+        exit_code = 2,
+        output_lines = { "error 2" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      -- Clean up
+      history.close_stacktrace()
+    end)
+  end)
+
+  describe("close_stacktrace", function()
+    it("should close open stacktrace window", function()
+      history.show_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      history.close_stacktrace()
+      assert.is_false(history.is_stacktrace_open())
+    end)
+
+    it("should not error when no stacktrace is open", function()
+      history.close_stacktrace()
+      assert.is_false(history.is_stacktrace_open())
+    end)
+  end)
+
+  describe("is_stacktrace_open", function()
+    it("should return false initially", function()
+      assert.is_false(history.is_stacktrace_open())
+    end)
+
+    it("should return true when stacktrace is open", function()
+      history.show_stacktrace({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      })
+      assert.is_true(history.is_stacktrace_open())
+
+      history.close_stacktrace()
+    end)
+  end)
+
+  describe("toggle_stacktrace", function()
+    it("should open stacktrace when closed", function()
+      local entry = {
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      }
+      local result = history.toggle_stacktrace(entry)
+      assert.is_true(result)
+      assert.is_true(history.is_stacktrace_open())
+
+      history.close_stacktrace()
+    end)
+
+    it("should close stacktrace when open", function()
+      local entry = {
+        script_name = "test",
+        exit_code = 1,
+        output_lines = { "error" },
+      }
+      history.show_stacktrace(entry)
+      assert.is_true(history.is_stacktrace_open())
+
+      local result = history.toggle_stacktrace(entry)
+      assert.is_false(result)
+      assert.is_false(history.is_stacktrace_open())
+    end)
+  end)
+
+  describe("output_lines in history entries", function()
+    it("should store output_lines in entry", function()
+      local output = { "line 1", "line 2", "error: something failed" }
+      history.add_entry({
+        script_name = "test",
+        exit_code = 1,
+        output_lines = output,
+      })
+
+      local entries = history.get_entries()
+      assert.are.equal(1, #entries)
+      assert.is_not_nil(entries[1].output_lines)
+      assert.are.equal(3, #entries[1].output_lines)
+      assert.are.equal("line 1", entries[1].output_lines[1])
+    end)
+
+    it("should handle entries without output_lines", function()
+      history.add_entry({
+        script_name = "test",
+        exit_code = 0,
+      })
+
+      local entries = history.get_entries()
+      assert.are.equal(1, #entries)
+      assert.is_nil(entries[1].output_lines)
+    end)
+  end)
 end)
 
 describe("termlet history integration", function()
@@ -497,6 +726,120 @@ describe("termlet history integration", function()
 
       -- Should not error, just notify
       termlet.toggle_history()
+    end)
+  end)
+
+  describe("show_last_stacktrace", function()
+    it("should return false when no failed executions", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local result = termlet.show_last_stacktrace()
+      assert.is_false(result)
+    end)
+
+    it("should return false when no history at all", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local result = termlet.show_last_stacktrace()
+      assert.is_false(result)
+    end)
+  end)
+
+  describe("toggle_last_stacktrace", function()
+    it("should return false when no failed executions", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local result = termlet.toggle_last_stacktrace()
+      assert.is_false(result)
+    end)
+  end)
+
+  describe("is_stacktrace_open", function()
+    it("should return false initially", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      assert.is_false(termlet.is_stacktrace_open())
+    end)
+  end)
+
+  describe("close_stacktrace", function()
+    it("should not error when no stacktrace is open", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      termlet.close_stacktrace()
+      assert.is_false(termlet.is_stacktrace_open())
+    end)
+  end)
+
+  describe("stacktrace from history integration", function()
+    it("should show stacktrace for failed entry added to history", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      -- Add a failed entry with output
+      local history_module = require("termlet.history")
+      history_module.add_entry({
+        script_name = "failing_build",
+        exit_code = 1,
+        output_lines = {
+          "Compiling...",
+          "error: undefined reference",
+          "  at main.c:42",
+        },
+      })
+
+      local result = termlet.show_last_stacktrace()
+      assert.is_true(result)
+      assert.is_true(termlet.is_stacktrace_open())
+
+      -- Toggle should close it
+      local toggle_result = termlet.toggle_last_stacktrace()
+      assert.is_false(toggle_result)
+      assert.is_false(termlet.is_stacktrace_open())
+    end)
+
+    it("should skip successful entries when showing last stacktrace", function()
+      termlet.setup({
+        scripts = {},
+        history = { enabled = true },
+      })
+
+      local history_module = require("termlet.history")
+      -- Add a failed entry first, then a successful one
+      history_module.add_entry({
+        script_name = "failed_test",
+        exit_code = 1,
+        output_lines = { "FAIL: test_something" },
+      })
+      history_module.add_entry({
+        script_name = "build_ok",
+        exit_code = 0,
+        output_lines = { "Build complete" },
+      })
+
+      -- Should show the failed entry, not the successful one
+      local result = termlet.show_last_stacktrace()
+      assert.is_true(result)
+      assert.is_true(termlet.is_stacktrace_open())
+
+      termlet.close_stacktrace()
     end)
   end)
 end)

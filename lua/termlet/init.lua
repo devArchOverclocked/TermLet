@@ -631,6 +631,9 @@ local function execute_script(script)
   -- Track start time for history
   local start_time = vim.loop.hrtime()
 
+  -- Collect output lines for storing in history (used for stacktrace display)
+  local collected_output = {}
+
   -- Run the command in the terminal.
   -- Note: termopen() creates a pseudo-terminal (PTY), which merges stdout and
   -- stderr into a single stream. on_stderr is never called with termopen().
@@ -662,6 +665,7 @@ local function execute_script(script)
             execution_time = execution_time,
             timestamp = os.time(),
             working_dir = cwd,
+            output_lines = collected_output,
             script = {
               name = script.name,
               filename = script.filename,
@@ -685,6 +689,14 @@ local function execute_script(script)
       -- ANSI escape codes are stripped before pattern matching.
       if config.stacktrace.enabled then
         stacktrace.process_terminal_output(data, cwd, buf)
+      end
+      -- Collect output for history stacktrace display
+      if config.history.enabled and data then
+        for _, line in ipairs(data) do
+          if line and line ~= "" then
+            table.insert(collected_output, stacktrace.strip_ansi(line))
+          end
+        end
       end
       -- Call user-defined callback if provided
       if script.on_stdout then
@@ -1355,6 +1367,40 @@ end
 function M.clear_history()
   history.clear_history()
   vim.notify("History cleared", vim.log.levels.INFO)
+end
+
+--- Show the stacktrace from the most recent failed execution
+---@return boolean Success
+function M.show_last_stacktrace()
+  local entry = history.get_last_failed_entry()
+  if not entry then
+    vim.notify("No failed executions with output in history", vim.log.levels.INFO)
+    return false
+  end
+
+  return history.show_stacktrace(entry)
+end
+
+--- Toggle the stacktrace view for the most recent failed execution
+---@return boolean New open state
+function M.toggle_last_stacktrace()
+  if history.is_stacktrace_open() then
+    history.close_stacktrace()
+    return false
+  else
+    return M.show_last_stacktrace()
+  end
+end
+
+--- Close the stacktrace view if open
+function M.close_stacktrace()
+  history.close_stacktrace()
+end
+
+--- Check if the stacktrace view is currently open
+---@return boolean
+function M.is_stacktrace_open()
+  return history.is_stacktrace_open()
 end
 
 --- Expose history module for advanced usage
