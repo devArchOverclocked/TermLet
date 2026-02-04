@@ -38,9 +38,8 @@ end
 local function filter_script(tbl, exclude_sensitive, sensitive_fields)
   local result = {}
   for k, v in pairs(tbl) do
-    local dominated_by_exclusion = type(v) == "function"
-      or (exclude_sensitive and is_sensitive_field(k, sensitive_fields))
-    if not dominated_by_exclusion then
+    local should_exclude = type(v) == "function" or (exclude_sensitive and is_sensitive_field(k, sensitive_fields))
+    if not should_exclude then
       if type(v) == "table" then
         result[k] = filter_script(v, exclude_sensitive, sensitive_fields)
       else
@@ -49,6 +48,50 @@ local function filter_script(tbl, exclude_sensitive, sensitive_fields)
     end
   end
   return result
+end
+
+--- Pretty-print a JSON string with indentation
+---@param json_str string Compact JSON string
+---@return string Pretty-printed JSON
+local function pretty_print_json(json_str)
+  local indent = 0
+  local result = {}
+  local in_string = false
+  local escape_next = false
+
+  for i = 1, #json_str do
+    local char = json_str:sub(i, i)
+
+    if escape_next then
+      table.insert(result, char)
+      escape_next = false
+    elseif char == "\\" and in_string then
+      table.insert(result, char)
+      escape_next = true
+    elseif char == '"' then
+      in_string = not in_string
+      table.insert(result, char)
+    elseif in_string then
+      table.insert(result, char)
+    elseif char == "{" or char == "[" then
+      indent = indent + 1
+      table.insert(result, char)
+      table.insert(result, "\n" .. string.rep("  ", indent))
+    elseif char == "}" or char == "]" then
+      indent = indent - 1
+      table.insert(result, "\n" .. string.rep("  ", indent))
+      table.insert(result, char)
+    elseif char == "," then
+      table.insert(result, char)
+      table.insert(result, "\n" .. string.rep("  ", indent))
+    elseif char == ":" then
+      table.insert(result, ": ")
+    elseif char ~= " " and char ~= "\n" and char ~= "\r" and char ~= "\t" then
+      table.insert(result, char)
+    end
+  end
+
+  return table.concat(result)
 end
 
 --- Serialize a Lua value to a Lua source string
@@ -201,13 +244,7 @@ function M.export_to_file(scripts, filepath, opts)
 
   -- Pretty-print JSON for file output
   if opts.format == "json" then
-    local ok, decoded = pcall(vim.fn.json_decode, content)
-    if ok then
-      local ok2, pretty = pcall(vim.fn.json_encode, decoded)
-      if ok2 then
-        content = pretty
-      end
-    end
+    content = pretty_print_json(content)
   end
 
   local expanded_path = vim.fn.expand(filepath)
@@ -251,12 +288,12 @@ function M.parse_config(content, format)
     end
     return decoded, nil
   elseif format == "lua" then
-    -- Load Lua string in a sandboxed environment
-    local chunk, load_err = loadstring(content)
-    if not chunk then
-      return nil, "Invalid Lua: " .. tostring(load_err)
+    -- Reject bytecode to prevent sandbox bypass
+    if content:sub(1, 1) == "\27" then
+      return nil, "Lua bytecode is not allowed for security reasons"
     end
-    -- Sandbox: only allow safe operations
+
+    -- Sandbox: only allow safe operations (no os, io, require, load, dofile, etc.)
     local sandbox = {
       pairs = pairs,
       ipairs = ipairs,
@@ -267,9 +304,14 @@ function M.parse_config(content, format)
       string = { format = string.format },
       math = { floor = math.floor },
     }
-    if setfenv then
-      setfenv(chunk, sandbox)
+
+    -- Load Lua string in a sandboxed environment
+    -- Neovim uses LuaJIT (Lua 5.1 compatible), so use loadstring + setfenv
+    local chunk, load_err = loadstring(content, "=imported_config")
+    if not chunk then
+      return nil, "Invalid Lua: " .. tostring(load_err)
     end
+    setfenv(chunk, sandbox)
     local ok, result = pcall(chunk)
     if not ok then
       return nil, "Failed to evaluate Lua config: " .. tostring(result)
@@ -283,6 +325,9 @@ function M.parse_config(content, format)
   return nil, "Unsupported format: " .. format
 end
 
+-- Current config version supported by this module
+local CURRENT_VERSION = 1
+
 --- Validate imported config data structure
 ---@param data table Parsed config data
 ---@return boolean Valid
@@ -290,6 +335,21 @@ end
 function M.validate_config(data)
   if type(data) ~= "table" then
     return false, "Config must be a table"
+  end
+
+  -- Validate version field
+  if data.version ~= nil then
+    if type(data.version) ~= "number" then
+      return false, "Config 'version' must be a number"
+    end
+    if data.version > CURRENT_VERSION then
+      return false,
+        "Config version "
+          .. data.version
+          .. " is not supported (max supported: "
+          .. CURRENT_VERSION
+          .. "). Please update TermLet."
+    end
   end
 
   if not data.scripts then
@@ -562,5 +622,6 @@ M._is_sensitive_field = is_sensitive_field
 M._filter_script = filter_script
 M._serialize_lua = serialize_lua
 M._detect_format = detect_format
+M._pretty_print_json = pretty_print_json
 
 return M

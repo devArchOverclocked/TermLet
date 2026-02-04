@@ -1618,8 +1618,22 @@ function M.import_config(filepath, opts)
   -- Apply the import
   config.scripts = sharing.merge_scripts(config.scripts, data.scripts, mode)
 
-  -- Re-run setup to apply new scripts
-  M.setup({ scripts = config.scripts })
+  -- Re-register script functions and keybindings without full setup
+  for _, script in ipairs(config.scripts) do
+    if script.name then
+      if not script.root_dir and config.root_dir then
+        script.root_dir = config.root_dir
+      end
+      local function_name = "run_" .. script.name:gsub("[%s%-%.]", "_"):lower()
+      if function_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
+        M[function_name] = function()
+          return execute_script(script)
+        end
+      end
+    end
+  end
+  keybindings.init(config.scripts)
+  apply_keybindings()
 
   vim.notify(
     "Imported "

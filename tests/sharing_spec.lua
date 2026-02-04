@@ -155,6 +155,31 @@ describe("termlet.sharing", function()
   end)
 
   -- =========================================================================
+  -- JSON pretty printing
+  -- =========================================================================
+
+  describe("_pretty_print_json", function()
+    it("should produce multi-line output for objects", function()
+      local compact = '{"name":"test","version":1}'
+      local pretty = sharing._pretty_print_json(compact)
+      assert.is_truthy(pretty:find("\n"))
+    end)
+
+    it("should indent nested structures", function()
+      local compact = '{"scripts":[{"name":"build"}]}'
+      local pretty = sharing._pretty_print_json(compact)
+      assert.is_truthy(pretty:find("\n"))
+      assert.is_truthy(pretty:find("  "))
+    end)
+
+    it("should preserve string content with special characters", function()
+      local compact = '{"name":"hello \\"world\\""}'
+      local pretty = sharing._pretty_print_json(compact)
+      assert.is_truthy(pretty:find("hello"))
+    end)
+  end)
+
+  -- =========================================================================
   -- Format detection
   -- =========================================================================
 
@@ -465,6 +490,64 @@ describe("termlet.sharing", function()
       assert.is_nil(data)
       assert.is_truthy(err:find("Unsupported"))
     end)
+
+    -- Sandbox security tests
+    it("should sandbox Lua imports against os.execute", function()
+      local malicious = 'os.execute("echo pwned") return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should sandbox Lua imports against require", function()
+      local malicious = 'local os = require("os") return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should sandbox Lua imports against io.popen", function()
+      local malicious = 'io.popen("whoami") return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should sandbox Lua imports against io.open", function()
+      local malicious = 'io.open("/etc/passwd", "r") return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should sandbox Lua imports against loadstring", function()
+      local malicious = 'loadstring("return 1")() return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should sandbox Lua imports against dofile", function()
+      local malicious = 'dofile("/etc/passwd") return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should sandbox Lua imports against rawset on _G", function()
+      local malicious = 'rawset(_G, "evil", true) return { scripts = {} }'
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
+    it("should reject Lua bytecode", function()
+      -- Lua bytecode starts with \27Lua
+      local bytecode = "\27Lua" .. string.rep("\0", 20)
+      local data, err = sharing.parse_config(bytecode, "lua")
+      assert.is_nil(data)
+      assert.is_truthy(err:find("bytecode"))
+    end)
   end)
 
   -- =========================================================================
@@ -607,6 +690,41 @@ describe("termlet.sharing", function()
       })
       assert.is_false(valid)
       assert.is_truthy(err:find("must be a table"))
+    end)
+
+    it("should accept config with valid version", function()
+      local valid, err = sharing.validate_config({
+        version = 1,
+        scripts = { { name = "build", filename = "build.sh" } },
+      })
+      assert.is_true(valid)
+      assert.is_nil(err)
+    end)
+
+    it("should accept config without version field", function()
+      local valid, err = sharing.validate_config({
+        scripts = { { name = "build", filename = "build.sh" } },
+      })
+      assert.is_true(valid)
+      assert.is_nil(err)
+    end)
+
+    it("should reject config with non-numeric version", function()
+      local valid, err = sharing.validate_config({
+        version = "one",
+        scripts = { { name = "build", filename = "build.sh" } },
+      })
+      assert.is_false(valid)
+      assert.is_truthy(err:find("must be a number"))
+    end)
+
+    it("should reject config with unsupported future version", function()
+      local valid, err = sharing.validate_config({
+        version = 999,
+        scripts = { { name = "build", filename = "build.sh" } },
+      })
+      assert.is_false(valid)
+      assert.is_truthy(err:find("not supported"))
     end)
   end)
 
