@@ -765,6 +765,27 @@ describe("termlet.export_import", function()
       assert.is_truthy(err:find("path traversal"))
     end)
 
+    it("should reject filename with mid-path traversal", function()
+      local valid, err = export_import._validate_script({
+        name = "build",
+        filename = "scripts/../../../etc/passwd",
+      })
+      assert.is_false(valid)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:find("path traversal"))
+    end)
+
+    it("should reject relative_path with mid-path traversal", function()
+      local valid, err = export_import._validate_script({
+        name = "build",
+        dir_name = "scripts",
+        relative_path = "sub/../../../etc/passwd",
+      })
+      assert.is_false(valid)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:find("path traversal"))
+    end)
+
     it("should accept filename with subdirectory path", function()
       local valid, err = export_import._validate_script({
         name = "build",
@@ -786,6 +807,15 @@ describe("termlet.export_import", function()
 
     it("should detect .. at end of path", function()
       assert.is_true(export_import._has_path_traversal("scripts/.."))
+    end)
+
+    it("should detect .. in middle of path", function()
+      assert.is_true(export_import._has_path_traversal("foo/../bar"))
+      assert.is_true(export_import._has_path_traversal("/scripts/../../../etc/passwd"))
+    end)
+
+    it("should detect .. with backslash separators", function()
+      assert.is_true(export_import._has_path_traversal("foo\\..\\bar"))
     end)
 
     it("should not flag normal paths", function()

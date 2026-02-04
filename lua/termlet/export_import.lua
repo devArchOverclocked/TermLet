@@ -83,12 +83,10 @@ end
 ---@param path string Path to check
 ---@return boolean has_traversal
 local function has_path_traversal(path)
-  -- Check for ".." as a path component
-  if path == ".." then
-    return true
-  end
-  if path:match("^%.%./") or path:match("/%.\\.%./") or path:match("/%.%.$") then
-    return true
+  for component in path:gmatch("[^/\\]+") do
+    if component == ".." then
+      return true
+    end
   end
   return false
 end
@@ -345,16 +343,8 @@ function M.import_from_file(filepath)
     return nil, "File is empty: " .. filepath
   end
 
-  -- Parse based on file extension
-  local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
-  local data, err
-
-  if ext == "json" then
-    data, err = M.parse_json(content)
-  else
-    -- Default to JSON
-    data, err = M.parse_json(content)
-  end
+  -- Parse as JSON (the only supported format)
+  local data, err = M.parse_json(content)
 
   if not data then
     return nil, err
