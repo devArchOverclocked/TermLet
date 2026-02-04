@@ -94,9 +94,28 @@ describe("termlet.watch", function()
       assert.is_false(watch._is_excluded("anything", {}))
     end)
 
-    it("should match partial paths containing excluded names", function()
+    it("should match paths containing excluded directory as a component", function()
       local exclude = { "node_modules" }
       assert.is_true(watch._is_excluded("path/node_modules/file", exclude))
+    end)
+
+    it("should NOT match substrings within path components", function()
+      local exclude = { "build" }
+      -- "rebuild" contains "build" as a substring but is a different directory
+      assert.is_false(watch._is_excluded("rebuild", exclude))
+      assert.is_false(watch._is_excluded("build-tools", exclude))
+      -- But exact "build" component should still match
+      assert.is_true(watch._is_excluded("build", exclude))
+      assert.is_true(watch._is_excluded("src/build/output", exclude))
+    end)
+
+    it("should NOT match filenames that contain excluded name as substring", function()
+      local exclude = { "dist" }
+      assert.is_false(watch._is_excluded("distributed.lua", exclude))
+      assert.is_false(watch._is_excluded("redistribute", exclude))
+      -- But exact "dist" component should match
+      assert.is_true(watch._is_excluded("dist", exclude))
+      assert.is_true(watch._is_excluded("src/dist/bundle.js", exclude))
     end)
   end)
 

@@ -25,6 +25,8 @@ local debug_log = function() end
 --- Convert a glob pattern to a Lua pattern for matching.
 --- Supports: * (any non-/ chars), ? (single non-/ char), ** (recursive dir match).
 --- Processes character by character to avoid Lua pattern metacharacter conflicts.
+--- Note: Does NOT support {a,b} brace expansion. Use separate patterns instead
+--- (e.g., {"*.lua", "*.py"} rather than "*.{lua,py}").
 ---@param glob string Glob pattern like "*.lua" or "src/**/*.py"
 ---@return string Lua pattern
 local function glob_to_pattern(glob)
@@ -93,16 +95,24 @@ local function matches_patterns(filepath, patterns)
   return false
 end
 
---- Check if a path should be excluded from watching
----@param path string Path component to check
+--- Check if a path should be excluded from watching.
+--- Compares each path component exactly against the exclude list,
+--- so "build" excludes "build/" but not "rebuild/" or "build-tools/".
+---@param path string Path or path component to check
 ---@param exclude table List of directory names to exclude
 ---@return boolean
 local function is_excluded(path, exclude)
-  if not exclude then
+  if not exclude or #exclude == 0 then
     return false
   end
+  -- Build a lookup set for O(1) checks
+  local exclude_set = {}
   for _, excluded in ipairs(exclude) do
-    if path:find(excluded, 1, true) then
+    exclude_set[excluded] = true
+  end
+  -- Split path on "/" and check each component
+  for component in path:gmatch("[^/]+") do
+    if exclude_set[component] then
       return true
     end
   end
@@ -235,16 +245,22 @@ function M.start(script_name, script, watch_config, root_dir)
           return
         end
 
-        -- Build relative path for pattern matching
+        -- Build relative path for pattern matching.
+        -- libuv fs_event may return just a basename or a relative path depending
+        -- on the platform. Extract the basename for non-recursive pattern matching
+        -- and use the full filename for exclusion checks on path components.
         local rel_path = filename
+        local basename = filename:match("[^/]+$") or filename
 
-        -- Check if file matches watch patterns
-        if not matches_patterns(rel_path, cfg.patterns) then
+        -- Check exclusions on the full path (checks each component)
+        if is_excluded(rel_path, cfg.exclude) then
           return
         end
 
-        -- Check exclusions on the filename
-        if is_excluded(rel_path, cfg.exclude) then
+        -- Check if file matches watch patterns.
+        -- Try matching against both the full relative path and just the basename,
+        -- so that patterns like "*.lua" work reliably even if libuv returns a path.
+        if not matches_patterns(rel_path, cfg.patterns) and not matches_patterns(basename, cfg.patterns) then
           return
         end
 
@@ -288,6 +304,14 @@ function M.start(script_name, script, watch_config, root_dir)
     return false
   end
 
+  -- Log if some directories failed to watch (partial success)
+  local failed_count = #dirs - #w.watcher_handles
+  if failed_count > 0 then
+    debug_log(
+      "Watch: " .. failed_count .. " of " .. #dirs .. " directories failed to watch for '" .. script_name .. "'"
+    )
+  end
+
   watchers[script_name] = w
   return true
 end
@@ -310,7 +334,9 @@ function M.stop_all()
   watchers = {}
 end
 
---- Toggle watch mode for a script
+--- Toggle watch mode for a script.
+--- Note: This function does NOT emit notifications. The caller (init.lua) owns
+--- all user-facing notifications to avoid duplicates between API layers.
 ---@param script_name string
 ---@param script table Script configuration
 ---@param watch_config table Watch configuration
@@ -319,14 +345,9 @@ end
 function M.toggle(script_name, script, watch_config, root_dir)
   if M.is_watching(script_name) then
     M.stop(script_name)
-    vim.notify("[TermLet] Watch mode disabled for '" .. script_name .. "'", vim.log.levels.INFO)
     return false
   else
-    local ok = M.start(script_name, script, watch_config, root_dir)
-    if ok then
-      vim.notify("[TermLet] Watch mode enabled for '" .. script_name .. "'", vim.log.levels.INFO)
-    end
-    return ok
+    return M.start(script_name, script, watch_config, root_dir)
   end
 end
 

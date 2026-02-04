@@ -139,8 +139,7 @@ local function replace_placeholder(str, placeholder, replacement)
 end
 
 -- Format terminal title using config placeholders
-local function format_terminal_title(term_config, name, status, opts)
-  opts = opts or {}
+local function format_terminal_title(term_config, name, status)
   local title = term_config.title_format or " {icon} {name} "
 
   local icon = term_config.title_icon or ""
@@ -153,10 +152,6 @@ local function format_terminal_title(term_config, name, status, opts)
     status_text = icons[status] or ""
   end
   title = replace_placeholder(title, "{status}", status_text)
-
-  -- Add watch indicator if watching
-  local watch_text = opts.watching and "[watching]" or ""
-  title = replace_placeholder(title, "{watch}", watch_text)
 
   -- Trim trailing whitespace when status placeholder was empty
   title = title:gsub("%s+$", " ")
@@ -819,6 +814,13 @@ function M.setup(user_config)
   -- Initialize watch module
   watch.set_execute_callback(execute_script)
   watch.set_debug_log(debug_log)
+
+  -- Clean up watch handles on Neovim exit
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    callback = function()
+      watch.stop_all()
+    end,
+  })
 
   -- Validate scripts configuration
   if not config.scripts or type(config.scripts) ~= "table" then
