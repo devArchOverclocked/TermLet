@@ -414,6 +414,14 @@ local function show_stacktrace_selected()
     return
   end
 
+  -- Check exit code first, before toggle logic. This ensures the exit_code == 0
+  -- guard is never bypassed by the toggle path (e.g., if last_stacktrace_entry
+  -- somehow references a successful entry).
+  if selected_entry.exit_code == 0 then
+    vim.notify("Script succeeded (exit code 0) - no stacktrace to show", vim.log.levels.INFO)
+    return
+  end
+
   -- If the stacktrace is already open for this same entry, toggle it closed
   if M.is_stacktrace_open() and state.last_stacktrace_entry == selected_entry then
     M.hide_stacktrace()
@@ -423,12 +431,6 @@ local function show_stacktrace_selected()
   -- If we have a hidden stacktrace for this same entry, toggle it back open
   if not M.is_stacktrace_open() and state.last_stacktrace_entry == selected_entry then
     reopen_stacktrace(selected_entry, state.stacktrace_cursor_pos)
-    return
-  end
-
-  -- Check if the entry has a non-zero exit code
-  if selected_entry.exit_code == 0 then
-    vim.notify("Script succeeded (exit code 0) - no stacktrace to show", vim.log.levels.INFO)
     return
   end
 
