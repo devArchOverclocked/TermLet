@@ -1965,8 +1965,15 @@ describe("termlet", function()
       -- Scroll to show the end of the file
       vim.cmd("normal! zb")
 
-      -- Use a terminal row that overlaps with the window
-      local term_row = math.floor(vim.o.lines * 0.7)
+      -- Compute a term_row guaranteed to overlap with the window's visible area,
+      -- independent of headless terminal dimensions.
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_height = vim.api.nvim_win_get_height(win)
+      local win_bottom_row = win_pos[1] + win_height
+      -- Place the terminal row inside the window (halfway between top and bottom)
+      local term_row = win_pos[1] + math.floor(win_height / 2)
+      assert.is_true(win_bottom_row > term_row, "test setup: window bottom must exceed term_row")
+
       local restore = termlet._adjust_viewport_for_terminal(win, term_row)
       assert.is_function(restore)
 
@@ -1993,18 +2000,20 @@ describe("termlet", function()
 
       local view_before = vim.fn.winsaveview()
 
-      -- Simulate a terminal that occupies the bottom portion
-      local term_row = math.floor(vim.o.lines * 0.7)
-      local restore = termlet._adjust_viewport_for_terminal(win, term_row)
+      -- Compute a term_row guaranteed to overlap, independent of terminal dimensions
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_height = vim.api.nvim_win_get_height(win)
+      local term_row = win_pos[1] + math.floor(win_height / 2)
 
-      -- After adjustment, the topline should have increased (scrolled down in the buffer)
+      local restore = termlet._adjust_viewport_for_terminal(win, term_row)
+      assert.is_not_nil(restore, "expected adjustment to occur")
+
+      -- After adjustment, the topline should have strictly increased (scrolled down in the buffer)
       local view_after = vim.fn.winsaveview()
-      assert.is_true(view_after.topline >= view_before.topline)
+      assert.is_true(view_after.topline > view_before.topline)
 
       -- Restore and clean up
-      if restore then
-        restore()
-      end
+      restore()
       vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
@@ -2025,7 +2034,11 @@ describe("termlet", function()
 
       local view_before = vim.fn.winsaveview()
 
-      local term_row = math.floor(vim.o.lines * 0.7)
+      -- Compute a term_row guaranteed to overlap, independent of terminal dimensions
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_height = vim.api.nvim_win_get_height(win)
+      local term_row = win_pos[1] + math.floor(win_height / 2)
+
       local restore = termlet._adjust_viewport_for_terminal(win, term_row)
       assert.is_function(restore)
 

@@ -384,7 +384,7 @@ function M.create_floating_terminal(opts)
   -- Adjust viewport of the original window so the terminal does not overlap
   -- file content. Only applies when position is "bottom".
   local restore_viewport = nil
-  if term_config.position ~= "center" and term_config.position ~= "top" then
+  if term_config.position == "bottom" then
     restore_viewport = adjust_viewport_for_terminal(opts.original_win, win_opts.row)
   end
 
