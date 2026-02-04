@@ -248,6 +248,62 @@ local function compute_win_opts(term_config, title)
   }
 end
 
+-- Adjust viewport of the original window so that the bottom terminal does not
+-- overlap any file content. Scrolls the window up so that its last visible
+-- line sits above the terminal's top edge. Returns a restore function that
+-- undoes the adjustment (called when the terminal window is closed).
+local function adjust_viewport_for_terminal(original_win, term_row)
+  if not original_win or not vim.api.nvim_win_is_valid(original_win) then
+    return nil
+  end
+
+  -- Determine the editor-row range occupied by the original window.
+  local win_pos = vim.api.nvim_win_get_position(original_win)
+  local win_top_row = win_pos[1] -- 0-indexed editor row of the window's top edge
+  local win_height = vim.api.nvim_win_get_height(original_win)
+  local win_bottom_row = win_top_row + win_height -- exclusive
+
+  -- If the original window's bottom edge is above the terminal, no adjustment needed.
+  -- term_row is the 0-indexed row where the terminal border starts.
+  if win_bottom_row <= term_row then
+    return nil
+  end
+
+  -- Number of visible lines we need to "lose" from the bottom of the window.
+  local overlap = win_bottom_row - term_row
+
+  -- Save the current view state so we can restore it.
+  local saved_view = vim.api.nvim_win_call(original_win, function()
+    return vim.fn.winsaveview()
+  end)
+
+  -- Scroll the window down by `overlap` lines (moving the topline forward in the
+  -- buffer) while keeping the cursor position unchanged.
+  vim.api.nvim_win_call(original_win, function()
+    local new_topline = saved_view.topline + overlap
+    local buf_line_count = vim.api.nvim_buf_line_count(0)
+    if new_topline > buf_line_count then
+      new_topline = buf_line_count
+    end
+    local view = vim.fn.winsaveview()
+    view.topline = new_topline
+    vim.fn.winrestview(view)
+  end)
+
+  -- Return a restore function.
+  return function()
+    if vim.api.nvim_win_is_valid(original_win) then
+      vim.api.nvim_win_call(original_win, function()
+        vim.fn.winrestview(saved_view)
+      end)
+    end
+  end
+end
+
+-- Expose for testing (must be after function definitions)
+M._adjust_viewport_for_terminal = adjust_viewport_for_terminal
+M._compute_win_opts = compute_win_opts
+
 -- Apply winhighlight groups to a window
 local function apply_win_highlights(win, highlights)
   if highlights then
@@ -325,6 +381,13 @@ function M.create_floating_terminal(opts)
   vim.api.nvim_set_option_value("bufhidden", bufhidden_value, { buf = buf })
   vim.api.nvim_set_option_value("filetype", "terminal", { buf = buf })
   vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
+  -- Adjust viewport of the original window so the terminal does not overlap
+  -- file content. Only applies when position is "bottom".
+  local restore_viewport = nil
+  if term_config.position == "bottom" then
+    restore_viewport = adjust_viewport_for_terminal(opts.original_win, win_opts.row)
+  end
+
   -- Store reference for cleanup (table for status title updates)
   active_terminals[win] = {
     buf = buf,
@@ -337,6 +400,11 @@ function M.create_floating_terminal(opts)
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(win),
     callback = function()
+      -- Restore the original window's viewport before clearing state
+      if restore_viewport then
+        restore_viewport()
+      end
+
       active_terminals[win] = nil
 
       -- Clear active filters, original script config, and cached original lines for this buffer

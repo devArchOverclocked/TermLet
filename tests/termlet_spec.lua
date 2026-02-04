@@ -1926,4 +1926,313 @@ describe("termlet", function()
       assert.equals("<leader>t", bindings["test"])
     end)
   end)
+
+  describe("viewport adjustment for bottom terminal", function()
+    it("should return nil when original_win is nil", function()
+      termlet.setup({ scripts = {} })
+      local restore = termlet._adjust_viewport_for_terminal(nil, 10)
+      assert.is_nil(restore)
+    end)
+
+    it("should return nil when original_win is invalid", function()
+      termlet.setup({ scripts = {} })
+      local restore = termlet._adjust_viewport_for_terminal(99999, 10)
+      assert.is_nil(restore)
+    end)
+
+    it("should return nil when window bottom is above terminal row", function()
+      termlet.setup({ scripts = {} })
+      local win = vim.api.nvim_get_current_win()
+      -- Use a terminal row that is far below the window's bottom
+      local restore = termlet._adjust_viewport_for_terminal(win, vim.o.lines + 100)
+      assert.is_nil(restore)
+    end)
+
+    it("should return a restore function when adjustment is needed", function()
+      termlet.setup({ scripts = {} })
+      -- Create a buffer with many lines so we can scroll
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_set_current_buf(buf)
+
+      local win = vim.api.nvim_get_current_win()
+      -- Set cursor near the bottom of the file
+      vim.api.nvim_win_set_cursor(win, { 200, 0 })
+      -- Scroll to show the end of the file
+      vim.cmd("normal! zb")
+
+      -- Compute a term_row guaranteed to overlap with the window's visible area,
+      -- independent of headless terminal dimensions.
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_height = vim.api.nvim_win_get_height(win)
+      local win_bottom_row = win_pos[1] + win_height
+      -- Place the terminal row inside the window (halfway between top and bottom)
+      local term_row = win_pos[1] + math.floor(win_height / 2)
+      assert.is_true(win_bottom_row > term_row, "test setup: window bottom must exceed term_row")
+
+      local restore = termlet._adjust_viewport_for_terminal(win, term_row)
+      assert.is_function(restore)
+
+      -- Clean up
+      restore()
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should scroll the window so content is above the terminal", function()
+      termlet.setup({ scripts = {} })
+      -- Create a buffer with many lines
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_set_current_buf(buf)
+
+      local win = vim.api.nvim_get_current_win()
+      -- Position cursor at end of file and scroll to show it
+      vim.api.nvim_win_set_cursor(win, { 200, 0 })
+      vim.cmd("normal! zb")
+
+      local view_before = vim.fn.winsaveview()
+
+      -- Compute a term_row guaranteed to overlap, independent of terminal dimensions
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_height = vim.api.nvim_win_get_height(win)
+      local term_row = win_pos[1] + math.floor(win_height / 2)
+
+      local restore = termlet._adjust_viewport_for_terminal(win, term_row)
+      assert.is_not_nil(restore, "expected adjustment to occur")
+
+      -- After adjustment, the topline should have strictly increased (scrolled down in the buffer)
+      local view_after = vim.fn.winsaveview()
+      assert.is_true(view_after.topline > view_before.topline)
+
+      -- Restore and clean up
+      restore()
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should restore viewport when restore function is called", function()
+      termlet.setup({ scripts = {} })
+      -- Create a buffer with many lines
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_set_current_buf(buf)
+
+      local win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_cursor(win, { 200, 0 })
+      vim.cmd("normal! zb")
+
+      local view_before = vim.fn.winsaveview()
+
+      -- Compute a term_row guaranteed to overlap, independent of terminal dimensions
+      local win_pos = vim.api.nvim_win_get_position(win)
+      local win_height = vim.api.nvim_win_get_height(win)
+      local term_row = win_pos[1] + math.floor(win_height / 2)
+
+      local restore = termlet._adjust_viewport_for_terminal(win, term_row)
+      assert.is_function(restore)
+
+      -- Restore
+      restore()
+
+      local view_after_restore = vim.fn.winsaveview()
+      assert.are.equal(view_before.topline, view_after_restore.topline)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should adjust viewport when creating bottom terminal with original_win", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { position = "bottom", height_ratio = 0.3 },
+      })
+
+      -- Create a buffer with many lines
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_set_current_buf(buf)
+
+      local original_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_cursor(original_win, { 200, 0 })
+      vim.cmd("normal! zb")
+
+      local view_before = vim.fn.winsaveview()
+
+      -- Create the terminal
+      local term_buf, term_win = termlet.create_floating_terminal({
+        title = "test_viewport",
+        original_win = original_win,
+      })
+      assert.is_not_nil(term_buf)
+      assert.is_not_nil(term_win)
+
+      -- Switch back to original window to check its viewport
+      vim.api.nvim_set_current_win(original_win)
+      local view_after = vim.fn.winsaveview()
+
+      -- The topline should have been adjusted (scrolled)
+      assert.is_true(view_after.topline >= view_before.topline)
+
+      -- Close terminal - should restore viewport
+      vim.api.nvim_win_close(term_win, true)
+      vim.wait(50) -- Let the WinClosed autocmd fire
+
+      local view_restored = vim.fn.winsaveview()
+      assert.are.equal(view_before.topline, view_restored.topline)
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should not adjust viewport for center position", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { position = "center", height_ratio = 0.3 },
+      })
+
+      -- Create a buffer with many lines
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_set_current_buf(buf)
+
+      local original_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_cursor(original_win, { 200, 0 })
+      vim.cmd("normal! zb")
+
+      local topline_before = vim.fn.line("w0")
+
+      -- Create center terminal
+      local term_buf, term_win = termlet.create_floating_terminal({
+        title = "test_center",
+        original_win = original_win,
+      })
+      assert.is_not_nil(term_buf)
+
+      -- Switch back to check viewport
+      vim.api.nvim_set_current_win(original_win)
+      local topline_after = vim.fn.line("w0")
+
+      -- Viewport should be unchanged for center position
+      assert.are.equal(topline_before, topline_after)
+
+      if term_win and vim.api.nvim_win_is_valid(term_win) then
+        vim.api.nvim_win_close(term_win, true)
+      end
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should not adjust viewport for top position", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { position = "top", height_ratio = 0.3 },
+      })
+
+      -- Create a buffer with many lines
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = {}
+      for i = 1, 200 do
+        lines[i] = "Line " .. i
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_set_current_buf(buf)
+
+      local original_win = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_cursor(original_win, { 200, 0 })
+      vim.cmd("normal! zb")
+
+      local topline_before = vim.fn.line("w0")
+
+      -- Create top terminal
+      local term_buf, term_win = termlet.create_floating_terminal({
+        title = "test_top",
+        original_win = original_win,
+      })
+      assert.is_not_nil(term_buf)
+
+      -- Switch back to check viewport
+      vim.api.nvim_set_current_win(original_win)
+      local topline_after = vim.fn.line("w0")
+
+      -- Viewport should be unchanged for top position
+      assert.are.equal(topline_before, topline_after)
+
+      if term_win and vim.api.nvim_win_is_valid(term_win) then
+        vim.api.nvim_win_close(term_win, true)
+      end
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should handle small buffer that does not need scrolling", function()
+      termlet.setup({
+        scripts = {},
+        terminal = { position = "bottom", height_ratio = 0.3 },
+      })
+
+      -- Create a buffer with just a few lines
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Line 1", "Line 2", "Line 3" })
+      vim.api.nvim_set_current_buf(buf)
+
+      local original_win = vim.api.nvim_get_current_win()
+
+      -- Create the terminal - should not error even with small buffer
+      local term_buf, term_win = termlet.create_floating_terminal({
+        title = "test_small",
+        original_win = original_win,
+      })
+      assert.is_not_nil(term_buf)
+      assert.is_not_nil(term_win)
+
+      if term_win and vim.api.nvim_win_is_valid(term_win) then
+        vim.api.nvim_win_close(term_win, true)
+      end
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should expose compute_win_opts for testing", function()
+      termlet.setup({ scripts = {} })
+      local opts = termlet._compute_win_opts({
+        height_ratio = 0.16,
+        width_ratio = 1.0,
+        position = "bottom",
+        border = "rounded",
+        title_pos = "center",
+      }, "test")
+      assert.is_number(opts.row)
+      assert.is_number(opts.height)
+      assert.is_number(opts.width)
+      assert.are.equal("editor", opts.relative)
+    end)
+
+    it("should compute correct row for bottom position", function()
+      termlet.setup({ scripts = {} })
+      local opts = termlet._compute_win_opts({
+        height_ratio = 0.16,
+        width_ratio = 1.0,
+        position = "bottom",
+        border = "rounded",
+        title_pos = "center",
+      }, "test")
+      local expected_height = math.floor(vim.o.lines * 0.16)
+      local expected_row = vim.o.lines - expected_height - 2
+      assert.are.equal(expected_row, opts.row)
+    end)
+  end)
 end)
