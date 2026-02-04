@@ -79,6 +79,20 @@ local function strip_sensitive(script, fields)
   return cleaned
 end
 
+--- Check if a path contains traversal components (e.g., "..")
+---@param path string Path to check
+---@return boolean has_traversal
+local function has_path_traversal(path)
+  -- Check for ".." as a path component
+  if path == ".." then
+    return true
+  end
+  if path:match("^%.%./") or path:match("/%.\\.%./") or path:match("/%.%.$") then
+    return true
+  end
+  return false
+end
+
 --- Validate a single script configuration
 ---@param script table Script to validate
 ---@return boolean valid
@@ -101,6 +115,16 @@ local function validate_script(script)
 
   if not has_filename and not has_legacy then
     return false, "Script '" .. script.name .. "' must have 'filename' or both 'dir_name' and 'relative_path'"
+  end
+
+  -- Validate that filename does not contain path traversal
+  if has_filename and has_path_traversal(script.filename) then
+    return false, "Script '" .. script.name .. "': filename must not contain '..' path traversal"
+  end
+
+  -- Validate that relative_path does not contain path traversal
+  if has_legacy and has_path_traversal(script.relative_path) then
+    return false, "Script '" .. script.name .. "': relative_path must not contain '..' path traversal"
   end
 
   -- Validate field types
@@ -169,7 +193,7 @@ end
 
 --- Export scripts to JSON format
 ---@param scripts table List of script configurations
----@param opts table|nil Export options: { strip_sensitive = true, include_fields = nil, exclude_fields = nil }
+---@param opts table|nil Export options: { strip_sensitive = true, include_fields = nil, strip_fields = nil }
 ---@return string|nil json_string
 ---@return string|nil error_message
 function M.export_json(scripts, opts)
@@ -185,7 +209,7 @@ function M.export_json(scripts, opts)
   for _, script in ipairs(scripts) do
     local exported
     if strip then
-      exported = strip_sensitive(script, opts.exclude_fields)
+      exported = strip_sensitive(script, opts.strip_fields)
     else
       exported = vim.deepcopy(script)
     end
@@ -260,15 +284,22 @@ function M.export_to_file(scripts, filepath, opts)
     return false, "Directory does not exist: " .. parent_dir
   end
 
-  -- Write file
-  local file, write_err = io.open(filepath, "w")
+  -- Write atomically: write to temp file then rename
+  local tmpfile = filepath .. ".tmp." .. tostring(os.time())
+  local file, write_err = io.open(tmpfile, "w")
   if not file then
-    return false, "Failed to open file for writing: " .. tostring(write_err)
+    return false, "Failed to open temp file for writing: " .. tostring(write_err)
   end
 
   file:write(json_str)
   file:write("\n")
   file:close()
+
+  local rename_ok, rename_err = os.rename(tmpfile, filepath)
+  if not rename_ok then
+    os.remove(tmpfile)
+    return false, "Failed to rename temp file: " .. tostring(rename_err)
+  end
 
   return true, nil
 end
@@ -645,15 +676,6 @@ function M.open_preview(import_data, existing_scripts, callback, ui_config)
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
 
-  -- Auto-close on buffer leave
-  vim.api.nvim_create_autocmd("BufLeave", {
-    buffer = state.buf,
-    callback = function()
-      M.close_preview()
-    end,
-    once = true,
-  })
-
   -- Set up keymaps
   setup_keymaps()
 
@@ -695,5 +717,6 @@ end
 -- Expose internal functions for testing
 M._strip_sensitive = strip_sensitive
 M._validate_script = validate_script
+M._has_path_traversal = has_path_traversal
 
 return M

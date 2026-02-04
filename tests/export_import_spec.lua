@@ -150,6 +150,31 @@ describe("termlet.export_import", function()
       assert.is_nil(data.metadata)
     end)
 
+    it("should use strip_fields to customize which fields are stripped", function()
+      local scripts = {
+        {
+          name = "build",
+          filename = "build.sh",
+          description = "Build project",
+          cmd = "./build.sh",
+          env = { VAR = "val" },
+        },
+      }
+
+      -- strip_fields should strip the specified fields instead of the defaults
+      local json_str, _err = export_import.export_json(scripts, {
+        strip_fields = { "description", "cmd" },
+      })
+      local data = vim.fn.json_decode(json_str)
+      local build = data.scripts[1]
+
+      -- description and cmd should be stripped
+      assert.is_nil(build.description)
+      assert.is_nil(build.cmd)
+      -- env should NOT be stripped (it's in defaults, but strip_fields overrides)
+      assert.is_not_nil(build.env)
+    end)
+
     it("should filter to include_fields when specified", function()
       local json_str, _err = export_import.export_json(test_scripts, {
         include_fields = { "name", "filename", "description" },
@@ -204,6 +229,32 @@ describe("termlet.export_import", function()
       local ok, err = export_import.export_to_file({}, tmpfile)
       assert.is_false(ok)
       assert.is_not_nil(err)
+    end)
+
+    it("should write atomically (no temp file left on success)", function()
+      local tmpfile = vim.fn.tempname() .. ".json"
+      local ok, err = export_import.export_to_file(test_scripts, tmpfile)
+      assert.is_true(ok)
+      assert.is_nil(err)
+
+      -- The target file should exist
+      assert.equals(1, vim.fn.filereadable(tmpfile))
+
+      -- No temp file should remain (temp file pattern: filepath.tmp.<timestamp>)
+      local tmpdir = vim.fn.fnamemodify(tmpfile, ":h")
+      local basename = vim.fn.fnamemodify(tmpfile, ":t")
+      local handle = vim.loop.fs_scandir(tmpdir)
+      if handle then
+        while true do
+          local name = vim.loop.fs_scandir_next(handle)
+          if not name then
+            break
+          end
+          assert.is_falsy(name:match("^" .. vim.pesc(basename) .. "%.tmp%."), "Temp file should not remain: " .. name)
+        end
+      end
+
+      os.remove(tmpfile)
     end)
   end)
 
@@ -365,6 +416,30 @@ describe("termlet.export_import", function()
         assert.is_true(valid, "Should accept run_after_deps='" .. mode .. "': " .. tostring(err))
         assert.is_nil(err)
       end
+    end)
+
+    it("should reject scripts with path traversal in filename", function()
+      local data = {
+        scripts = {
+          { name = "malicious", filename = "../../.bashrc" },
+        },
+      }
+      local valid, err = export_import.validate_import_data(data)
+      assert.is_false(valid)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:find("path traversal"))
+    end)
+
+    it("should reject scripts with path traversal in relative_path", function()
+      local data = {
+        scripts = {
+          { name = "malicious", dir_name = "scripts", relative_path = "../../../etc/passwd" },
+        },
+      }
+      local valid, err = export_import.validate_import_data(data)
+      assert.is_false(valid)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:find("path traversal"))
     end)
 
     it("should accept scripts with optional fields", function()
@@ -585,7 +660,7 @@ describe("termlet.export_import", function()
       assert.equals("Deploy", cleaned.description)
     end)
 
-    it("should strip custom fields", function()
+    it("should strip custom fields via strip_fields", function()
       local script = {
         name = "build",
         filename = "build.sh",
@@ -667,6 +742,61 @@ describe("termlet.export_import", function()
       local valid, err = export_import._validate_script({ name = "build" })
       assert.is_false(valid)
       assert.is_not_nil(err)
+    end)
+
+    it("should reject filename with path traversal", function()
+      local valid, err = export_import._validate_script({
+        name = "build",
+        filename = "../../.bashrc",
+      })
+      assert.is_false(valid)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:find("path traversal"))
+    end)
+
+    it("should reject relative_path with path traversal", function()
+      local valid, err = export_import._validate_script({
+        name = "build",
+        dir_name = "scripts",
+        relative_path = "../../../etc/passwd",
+      })
+      assert.is_false(valid)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:find("path traversal"))
+    end)
+
+    it("should accept filename with subdirectory path", function()
+      local valid, err = export_import._validate_script({
+        name = "build",
+        filename = "scripts/build.sh",
+      })
+      assert.is_true(valid)
+      assert.is_nil(err)
+    end)
+  end)
+
+  describe("_has_path_traversal", function()
+    it("should detect bare ..", function()
+      assert.is_true(export_import._has_path_traversal(".."))
+    end)
+
+    it("should detect .. at start of path", function()
+      assert.is_true(export_import._has_path_traversal("../etc/passwd"))
+    end)
+
+    it("should detect .. at end of path", function()
+      assert.is_true(export_import._has_path_traversal("scripts/.."))
+    end)
+
+    it("should not flag normal paths", function()
+      assert.is_false(export_import._has_path_traversal("build.sh"))
+      assert.is_false(export_import._has_path_traversal("scripts/build.sh"))
+      assert.is_false(export_import._has_path_traversal("./build.sh"))
+    end)
+
+    it("should not flag filenames containing dots", function()
+      assert.is_false(export_import._has_path_traversal("my..file.sh"))
+      assert.is_false(export_import._has_path_traversal("file...sh"))
     end)
   end)
 
@@ -827,7 +957,7 @@ describe("termlet export/import integration", function()
   describe("setup", function()
     it("should expose export_import module", function()
       termlet.setup({ scripts = {} })
-      assert.is_not_nil(termlet.export_import)
+      assert.is_not_nil(termlet.get_export_import())
     end)
 
     it("should expose export/import functions", function()

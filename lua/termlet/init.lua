@@ -21,8 +21,8 @@ local filter = require("termlet.filter")
 -- Load filter UI module
 local filter_ui = require("termlet.filter_ui")
 
--- Load export/import module
-local export_import = require("termlet.export_import")
+-- Lazy-load export/import module (loaded on first use to reduce startup time)
+local export_import
 
 -- Default configuration
 local config = {
@@ -1499,6 +1499,14 @@ end
 -- Export/Import API
 -- ============================================================================
 
+--- Load export_import module on first use
+local function get_export_import()
+  if not export_import then
+    export_import = require("termlet.export_import")
+  end
+  return export_import
+end
+
 --- Export current script configurations to JSON string
 ---@param opts table|nil Export options { strip_sensitive = true }
 ---@return string|nil json_string
@@ -1509,7 +1517,7 @@ function M.export_scripts(opts)
     return nil, "No scripts configured"
   end
 
-  return export_import.export_json(config.scripts, opts)
+  return get_export_import().export_json(config.scripts, opts)
 end
 
 --- Export current script configurations to a file
@@ -1526,7 +1534,7 @@ function M.export_to_file(filepath, opts)
     -- Prompt for file path
     vim.ui.input({ prompt = "Export to file: ", default = ".termlet.json" }, function(input)
       if input and input ~= "" then
-        local ok, err = export_import.export_to_file(config.scripts, input, opts)
+        local ok, err = get_export_import().export_to_file(config.scripts, input, opts)
         if ok then
           vim.notify("Exported " .. #config.scripts .. " script(s) to " .. input, vim.log.levels.INFO)
         else
@@ -1535,7 +1543,7 @@ function M.export_to_file(filepath, opts)
       end
     end)
   else
-    local ok, err = export_import.export_to_file(config.scripts, filepath, opts)
+    local ok, err = get_export_import().export_to_file(config.scripts, filepath, opts)
     if ok then
       vim.notify("Exported " .. #config.scripts .. " script(s) to " .. filepath, vim.log.levels.INFO)
     else
@@ -1562,18 +1570,19 @@ end
 --- Internal import handler (separated for testability)
 ---@param filepath string File path to import from
 function M._do_import(filepath)
-  local data, err = export_import.import_from_file(filepath)
+  local ei = get_export_import()
+  local data, err = ei.import_from_file(filepath)
   if not data then
     vim.notify("Import failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
     return
   end
 
   -- Open preview UI
-  export_import.open_preview(data, config.scripts or {}, function(import_data, mode)
+  ei.open_preview(data, config.scripts or {}, function(import_data, mode)
     if mode == "replace" then
       config.scripts = vim.deepcopy(import_data.scripts)
     else
-      local merged, _changes = export_import.merge_scripts(config.scripts or {}, import_data.scripts)
+      local merged, _changes = ei.merge_scripts(config.scripts or {}, import_data.scripts)
       config.scripts = merged
     end
 
@@ -1585,16 +1594,19 @@ end
 
 --- Close the import preview if open
 function M.close_import_preview()
-  export_import.close_preview()
+  get_export_import().close_preview()
 end
 
 --- Check if import preview is currently open
 ---@return boolean
 function M.is_import_preview_open()
-  return export_import.is_preview_open()
+  return get_export_import().is_preview_open()
 end
 
---- Export/import module access
-M.export_import = export_import
+--- Export/import module access (lazy property)
+---@return table
+function M.get_export_import()
+  return get_export_import()
+end
 
 return M
