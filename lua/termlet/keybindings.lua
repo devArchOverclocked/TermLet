@@ -68,7 +68,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " c Capture  i Type  d Delete  ?Help  q Close ",
+    footer = " c Capture  i Type  d Delete  ? Help  q Close ",
     footer_pos = "center",
   }
 end
@@ -385,7 +385,7 @@ end
 local function restore_footer()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_set_config(state.win, {
-      footer = " c Capture  i Type  d Delete  ?Help  q Close ",
+      footer = " c Capture  i Type  d Delete  ? Help  q Close ",
       footer_pos = "center",
     })
   end
@@ -767,7 +767,13 @@ function M.open(scripts, on_save, ui_config)
   state.input_text = ""
   state.show_help = false
   state.on_save_callback = on_save
-  state.config = vim.tbl_deep_extend("force", default_config, ui_config or {})
+  local merged_config = ui_config or {}
+  -- Backwards compatibility: migrate highlight.title to highlight.header
+  if merged_config.highlight and merged_config.highlight.title and not merged_config.highlight.header then
+    merged_config.highlight.header = merged_config.highlight.title
+    merged_config.highlight.title = nil
+  end
+  state.config = vim.tbl_deep_extend("force", default_config, merged_config)
 
   -- Load saved keybindings
   state.keybindings = M.load()

@@ -61,7 +61,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " Enter Run  /Search  ?Help  q Close ",
+    footer = " Enter Run  / Search  ? Help  q Close ",
     footer_pos = "center",
   }
 end
@@ -501,7 +501,13 @@ function M.open(scripts, execute_callback, menu_config)
   state.search_mode = false
   state.show_help = false
   state.execute_callback = execute_callback
-  state.config = vim.tbl_deep_extend("force", default_config, menu_config or {})
+  local merged_config = menu_config or {}
+  -- Backwards compatibility: migrate highlight.title to highlight.header
+  if merged_config.highlight and merged_config.highlight.title and not merged_config.highlight.header then
+    merged_config.highlight.header = merged_config.highlight.title
+    merged_config.highlight.title = nil
+  end
+  state.config = vim.tbl_deep_extend("force", default_config, merged_config)
 
   -- Create buffer
   state.buf = vim.api.nvim_create_buf(false, true)

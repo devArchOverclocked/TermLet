@@ -395,7 +395,13 @@ function M.open(rerun_callback, ui_config)
   -- Initialize state
   state.selected_index = 1
   state.rerun_callback = rerun_callback
-  state.config = vim.tbl_deep_extend("force", default_config, ui_config or {})
+  local merged_config = ui_config or {}
+  -- Backwards compatibility: migrate highlight.title to highlight.header
+  if merged_config.highlight and merged_config.highlight.title and not merged_config.highlight.header then
+    merged_config.highlight.header = merged_config.highlight.title
+    merged_config.highlight.title = nil
+  end
+  state.config = vim.tbl_deep_extend("force", default_config, merged_config)
 
   -- Create buffer
   state.buf = vim.api.nvim_create_buf(false, true)

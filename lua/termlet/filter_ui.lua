@@ -37,7 +37,12 @@ function M.close()
   ui_state.win = nil
   ui_state.buf = nil
   ui_state.target_buf = nil
+  ui_state.selected_index = 1
 end
+
+-- Window dimensions for filter UI
+local win_width = 50
+local win_height = 12
 
 -- Render the filter UI content
 local function render_ui()
@@ -48,7 +53,7 @@ local function render_ui()
   -- Clear existing highlights
   vim.api.nvim_buf_clear_namespace(ui_state.buf, ns_id, 0, -1)
 
-  local width = 48
+  local width = win_width - 2 -- Account for borders
   local lines = {}
   local highlights = {}
 
@@ -83,8 +88,8 @@ local function render_ui()
 
   table.insert(lines, "")
 
-  -- Pad to fill
-  local target_height = 12
+  -- Pad to fill window
+  local target_height = win_height - 2 -- Account for borders
   while #lines < target_height do
     table.insert(lines, "")
   end
@@ -107,8 +112,11 @@ local function apply_current_preset()
     return
   end
 
+  -- Keep current_preset in sync with selected_index
+  ui_state.current_preset = presets[ui_state.selected_index].name
+
   local termlet = require("termlet")
-  termlet.apply_filter_preset_to_buf(ui_state.target_buf, presets[ui_state.selected_index].name)
+  termlet.apply_filter_preset_to_buf(ui_state.target_buf, ui_state.current_preset)
 end
 
 -- Navigation helpers
@@ -214,17 +222,15 @@ function M.open(target_buf)
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   vim.api.nvim_set_option_value("filetype", "termlet-filter", { buf = buf })
 
-  -- Calculate window size - use proper border/title/footer
-  local width = 50
-  local height = 12
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
+  -- Calculate window position
+  local row = math.floor((vim.o.lines - win_height) / 2)
+  local col = math.floor((vim.o.columns - win_width) / 2)
 
   -- Create floating window with proper Neovim borders
   local win_opts = {
     relative = "editor",
-    width = width,
-    height = height,
+    width = win_width,
+    height = win_height,
     row = row,
     col = col,
     style = "minimal",
@@ -276,5 +282,22 @@ function M.toggle(target_buf)
     M.open(target_buf)
   end
 end
+
+--- Get current UI state (for testing)
+---@return table
+function M.get_state()
+  return {
+    selected_index = ui_state.selected_index,
+    current_preset = ui_state.current_preset,
+    preset_count = #presets,
+  }
+end
+
+--- Programmatically trigger actions (for testing)
+M.actions = {
+  move_up = move_up,
+  move_down = move_down,
+  apply_current_preset = apply_current_preset,
+}
 
 return M
