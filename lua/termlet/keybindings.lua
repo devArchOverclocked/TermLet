@@ -23,16 +23,17 @@ local state = {
 -- Default configuration
 local default_config = {
   width_ratio = 0.6,
-  height_ratio = 0.5,
+  height_ratio = 0.6,
   border = "rounded",
   title = " TermLet Keybindings ",
   highlight = {
     selected = "CursorLine",
-    title = "Title",
+    header = "Title",
     help = "Comment",
     keybinding = "String",
     warning = "WarningMsg",
     notset = "NonText",
+    counter = "NonText",
   },
 }
 
@@ -50,8 +51,8 @@ local function calculate_window_opts(config)
   local height = math.floor(vim.o.lines * config.height_ratio)
 
   -- Minimum dimensions
-  width = math.max(width, 50)
-  height = math.max(height, 12)
+  width = math.max(width, 56)
+  height = math.max(height, 14)
 
   local row = math.floor((vim.o.lines - height) / 2)
   local col = math.floor((vim.o.columns - width) / 2)
@@ -67,41 +68,47 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [c] Capture  [i] Type  [d] Delete  [?] Help  [q] Close ",
+    footer = " c Capture  i Type  d Delete  ?Help  q Close ",
     footer_pos = "center",
   }
 end
 
 --- Get the help text lines
+---@param width number Available width
 ---@return table List of help text lines
-local function get_help_lines()
+local function get_help_lines(width)
+  local sep = "   " .. string.rep("─", math.max(width - 6, 30))
   return {
     "",
-    "  Keybindings:",
-    "  ────────────────────────────────",
-    "  j / ↓        Move down",
-    "  k / ↑        Move up",
-    "  c / Enter    Capture keybinding",
-    "  i            Type keybinding notation",
-    "  d            Delete keybinding",
-    "  Escape       Cancel / Close menu",
-    "  q            Close menu",
-    "  ?            Toggle this help",
-    "  gg           Go to first script",
-    "  G            Go to last script",
+    "   Keyboard Shortcuts",
+    sep,
     "",
-    "  Capture mode (c / Enter):",
-    "  ────────────────────────────────",
-    "  Press keys in sequence...",
-    "  Keys are recorded in real-time",
-    "  Enter        Confirm captured keys",
-    "  Escape       Cancel capture",
+    "   Navigation",
+    "   j / Down        Move down",
+    "   k / Up          Move up",
+    "   gg              Go to first script",
+    "   G               Go to last script",
     "",
-    "  Input mode (i):",
-    "  ────────────────────────────────",
-    "  Type notation: <leader>b, <C-k>",
-    "  Enter        Confirm input",
-    "  Escape       Cancel input",
+    "   Actions",
+    "   c / Enter       Capture keybinding",
+    "   i               Type keybinding notation",
+    "   d               Delete keybinding",
+    "   Esc             Cancel / close",
+    "   q               Close menu",
+    "   ?               Toggle this help",
+    "",
+    "   Capture Mode (c / Enter)",
+    sep,
+    "   Press keys in sequence",
+    "   Keys are recorded in real-time",
+    "   Enter           Confirm captured keys",
+    "   Esc             Cancel capture",
+    "",
+    "   Input Mode (i)",
+    sep,
+    "   Type notation: <leader>b, <C-k>",
+    "   Enter           Confirm input",
+    "   Esc             Cancel input",
     "",
   }
 end
@@ -109,17 +116,19 @@ end
 --- Format a keybinding entry for display
 ---@param script table Script configuration
 ---@param keybinding string|nil Current keybinding
+---@param index number Index in the list
 ---@param is_selected boolean Whether this entry is selected
 ---@param width number Available width for the line
 ---@return string Formatted line
-local function format_keybinding_line(script, keybinding, is_selected, width)
-  local prefix = is_selected and "  > " or "    "
+---@return table[] Inline highlight info
+local function format_keybinding_line(script, keybinding, index, is_selected, width)
+  local pointer = is_selected and "  " or "   "
+  local idx_str = string.format(" %d. ", index)
   local name = script.name or "unnamed"
 
   -- Calculate column widths (must match header in render_ui)
   local name_width = math.floor(width * 0.35)
   local key_width = math.floor(width * 0.25)
-  local action_width = 16 -- length of "[Change] [Clear]"
 
   -- Format all columns with string.format for consistent alignment
   local padded_name = string.format("%-" .. name_width .. "s", name:sub(1, name_width))
@@ -132,15 +141,25 @@ local function format_keybinding_line(script, keybinding, is_selected, width)
   end
   local padded_key = string.format("%-" .. key_width .. "s", key_display:sub(1, key_width))
 
-  local action_text
-  if keybinding and keybinding ~= "" then
-    action_text = "[Change] [Clear]"
-  else
-    action_text = "[Set]"
-  end
-  local padded_action = string.format("%-" .. action_width .. "s", action_text)
+  local line = pointer .. idx_str .. padded_name .. "  " .. padded_key
 
-  return prefix .. padded_name .. "  " .. padded_key .. "  " .. padded_action
+  local inline_hl = {}
+
+  -- Track key column for inline highlighting
+  local key_start = #pointer + #idx_str + name_width + 2
+  local key_end = key_start + #padded_key
+  if keybinding and keybinding ~= "" then
+    table.insert(inline_hl, { col_start = key_start, col_end = key_end, group = "keybinding" })
+  else
+    table.insert(inline_hl, { col_start = key_start, col_end = key_end, group = "notset" })
+  end
+
+  -- Pad to full width for consistent highlight background
+  if #line < width then
+    line = line .. string.rep(" ", width - #line)
+  end
+
+  return line, inline_hl
 end
 
 --- Render the keybindings UI
@@ -161,79 +180,51 @@ local function render_ui()
   -- Mode-specific rendering
   if state.mode == "capture" then
     -- Real-time key capture mode UI
-    local box_width = math.max(width - 4, 50)
-    local inner_width = box_width - 6 -- account for "  │  " prefix and " │" suffix
-
     table.insert(lines, "")
-    table.insert(lines, "  ╭─ Capture Keybinding " .. string.rep("─", box_width - 24) .. "╮")
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+    table.insert(lines, "   Capture Keybinding")
+    table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+
+    local sep = "   " .. string.rep("─", width - 6)
+    table.insert(lines, sep)
+    table.insert(lines, "")
 
     local script_name = state.scripts[state.selected_index] and state.scripts[state.selected_index].name or "unknown"
-    local setting_text = "Setting keybinding for: " .. script_name
-    local setting_line = "  │  " .. setting_text .. string.rep(" ", inner_width - #setting_text) .. " │"
-    table.insert(lines, setting_line)
-
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
-
-    local hint_text = "Press keys in sequence (real-time capture)..."
-    table.insert(lines, "  │  " .. hint_text .. string.rep(" ", inner_width - #hint_text) .. " │")
-
-    local esc_text = "Press <Esc> to cancel, <Enter> to confirm"
-    table.insert(lines, "  │  " .. esc_text .. string.rep(" ", inner_width - #esc_text) .. " │")
-
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+    table.insert(lines, "   Setting keybinding for: " .. script_name)
+    table.insert(lines, "")
+    table.insert(lines, "   Press keys in sequence (real-time capture)")
+    table.insert(lines, "   Enter to confirm, Esc to cancel")
+    table.insert(lines, "")
 
     local captured_display = #state.captured_keys > 0 and table.concat(state.captured_keys, "") or "(waiting...)"
-    local captured_text = "Captured: " .. captured_display
-    if #captured_text > inner_width then
-      captured_text = captured_text:sub(1, inner_width)
-    end
-    local captured_line = "  │  " .. captured_text .. string.rep(" ", inner_width - #captured_text) .. " │"
+    local captured_line = "   Captured:  " .. captured_display
     table.insert(lines, captured_line)
     if #state.captured_keys > 0 then
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.keybinding })
     end
-
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
-    table.insert(lines, "  ╰" .. string.rep("─", box_width - 2) .. "╯")
   elseif state.mode == "input" then
     -- Text input mode UI for typing notation like <leader>b
-    local box_width = math.max(width - 4, 50)
-    local inner_width = box_width - 6
-
     table.insert(lines, "")
-    table.insert(lines, "  ╭─ Type Keybinding Notation " .. string.rep("─", box_width - 30) .. "╮")
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+    table.insert(lines, "   Type Keybinding Notation")
+    table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
+
+    local sep = "   " .. string.rep("─", width - 6)
+    table.insert(lines, sep)
+    table.insert(lines, "")
 
     local script_name = state.scripts[state.selected_index] and state.scripts[state.selected_index].name or "unknown"
-    local setting_text = "Setting keybinding for: " .. script_name
-    local setting_line = "  │  " .. setting_text .. string.rep(" ", inner_width - #setting_text) .. " │"
-    table.insert(lines, setting_line)
-
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
-
-    local hint_text = "Type vim notation (e.g. <leader>b, <C-k>, <A-j>)"
-    table.insert(lines, "  │  " .. hint_text .. string.rep(" ", inner_width - #hint_text) .. " │")
-
-    local esc_text = "Press <Esc> to cancel, <Enter> to confirm"
-    table.insert(lines, "  │  " .. esc_text .. string.rep(" ", inner_width - #esc_text) .. " │")
-
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
+    table.insert(lines, "   Setting keybinding for: " .. script_name)
+    table.insert(lines, "")
+    table.insert(lines, "   Type vim notation (e.g. <leader>b, <C-k>, <A-j>)")
+    table.insert(lines, "   Enter to confirm, Esc to cancel")
+    table.insert(lines, "")
 
     local input_display = state.input_text .. "█"
-    local input_text = "Input: " .. input_display
-    if #input_text > inner_width then
-      input_text = input_text:sub(1, inner_width)
-    end
-    local input_line = "  │  " .. input_text .. string.rep(" ", inner_width - #input_text) .. " │"
+    local input_line = "   Input:  " .. input_display
     table.insert(lines, input_line)
     table.insert(highlights, { line = #lines - 1, group = state.config.highlight.keybinding })
-
-    table.insert(lines, "  │" .. string.rep(" ", box_width - 2) .. "│")
-    table.insert(lines, "  ╰" .. string.rep("─", box_width - 2) .. "╯")
   elseif state.show_help then
     -- Help display
-    for _, help_line in ipairs(get_help_lines()) do
+    for _, help_line in ipairs(get_help_lines(width)) do
       table.insert(lines, help_line)
       table.insert(highlights, { line = #lines - 1, group = state.config.highlight.help })
     end
@@ -244,38 +235,57 @@ local function render_ui()
     -- Header - use same column widths as data rows for alignment
     local name_width = math.floor(width * 0.35)
     local key_width = math.floor(width * 0.25)
-    local action_width = 16 -- matches "[Change] [Clear]" length
-    local header = "    "
-      .. string.format("%-" .. name_width .. "s", "Script")
+    local header = "   "
+      .. string.format("     %-" .. name_width .. "s", "Script")
       .. "  "
       .. string.format("%-" .. key_width .. "s", "Keybinding")
-      .. "  "
-      .. string.format("%-" .. action_width .. "s", "Action")
     table.insert(lines, header)
+    table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
 
-    local content_width = name_width + 2 + key_width + 2 + action_width
-    local separator = "    " .. string.rep("─", content_width)
-    table.insert(lines, separator)
-    table.insert(highlights, { line = 1, group = state.config.highlight.title })
+    local sep = "   " .. string.rep("─", width - 4)
+    table.insert(lines, sep)
+    table.insert(highlights, { line = #lines - 1, group = state.config.highlight.header })
 
     if #state.scripts == 0 then
       table.insert(lines, "")
-      table.insert(lines, "    No scripts configured")
+      table.insert(lines, "   No scripts configured")
       table.insert(lines, "")
     else
       for i, script in ipairs(state.scripts) do
         local is_selected = (i == state.selected_index)
         local keybinding = state.keybindings[script.name]
-        local line = format_keybinding_line(script, keybinding, is_selected, width)
+        local line, inline_hl = format_keybinding_line(script, keybinding, i, is_selected, width)
         table.insert(lines, line)
 
+        local line_idx = #lines - 1
         if is_selected then
-          table.insert(highlights, { line = #lines - 1, group = state.config.highlight.selected })
-        elseif not keybinding or keybinding == "" then
-          -- Highlight "(not set)" entries differently
-          table.insert(highlights, { line = #lines - 1, group = state.config.highlight.notset })
+          table.insert(highlights, { line = line_idx, group = state.config.highlight.selected })
+        end
+
+        -- Apply inline keybinding/notset highlights when not selected
+        if not is_selected then
+          for _, ihl in ipairs(inline_hl) do
+            table.insert(highlights, {
+              line = line_idx,
+              col_start = ihl.col_start,
+              col_end = ihl.col_end,
+              group = state.config.highlight[ihl.group] or state.config.highlight.notset,
+            })
+          end
         end
       end
+
+      -- Counter
+      table.insert(lines, "")
+      local bound_count = 0
+      for _, script in ipairs(state.scripts) do
+        if state.keybindings[script.name] and state.keybindings[script.name] ~= "" then
+          bound_count = bound_count + 1
+        end
+      end
+      local counter_text = string.format("   %d of %d scripts have keybindings", bound_count, #state.scripts)
+      table.insert(lines, counter_text)
+      table.insert(highlights, { line = #lines - 1, group = state.config.highlight.counter })
     end
   end
 
@@ -292,7 +302,11 @@ local function render_ui()
 
   -- Apply highlights
   for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+    if hl.col_start and hl.col_end then
+      vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, hl.col_start, hl.col_end)
+    else
+      vim.api.nvim_buf_add_highlight(state.buf, ns_id, hl.group, hl.line, 0, -1)
+    end
   end
 end
 
@@ -371,7 +385,7 @@ end
 local function restore_footer()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_set_config(state.win, {
-      footer = " [c] Capture  [i] Type  [d] Delete  [?] Help  [q] Close ",
+      footer = " c Capture  i Type  d Delete  ?Help  q Close ",
       footer_pos = "center",
     })
   end
@@ -455,7 +469,7 @@ local function enter_capture_mode()
   -- Update window footer
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_set_config(state.win, {
-      footer = " Press keys... <Enter> confirm  <Esc> cancel ",
+      footer = " Press keys...  Enter confirm  Esc cancel ",
       footer_pos = "center",
     })
   end
@@ -530,7 +544,7 @@ local function enter_input_mode()
   -- Update window footer
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_set_config(state.win, {
-      footer = " Type notation... <Enter> confirm  <Esc> cancel ",
+      footer = " Type notation...  Enter confirm  Esc cancel ",
       footer_pos = "center",
     })
   end
