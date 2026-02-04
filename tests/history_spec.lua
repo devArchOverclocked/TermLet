@@ -882,6 +882,137 @@ describe("termlet.history", function()
     end)
   end)
 
+  describe("output_lines truncation", function()
+    it("should store large output_lines in history entry", function()
+      -- Simulate what execute_script does: store only the tail
+      local large_output = {}
+      for i = 1, 2000 do
+        large_output[i] = "output line " .. i
+      end
+
+      -- Apply truncation logic matching execute_script
+      local max_output_lines = 1000
+      local output_lines
+      if #large_output > max_output_lines then
+        output_lines = { unpack(large_output, #large_output - max_output_lines + 1) }
+      else
+        output_lines = large_output
+      end
+
+      history.add_entry({
+        script_name = "verbose_build",
+        exit_code = 1,
+        execution_time = 5.0,
+        timestamp = os.time(),
+        working_dir = "/project",
+        output_lines = output_lines,
+      })
+
+      local entries = history.get_entries()
+      assert.are.equal(1, #entries)
+      assert.are.equal(1000, #entries[1].output_lines)
+      -- Should contain the last 1000 lines (1001-2000)
+      assert.are.equal("output line 1001", entries[1].output_lines[1])
+      assert.are.equal("output line 2000", entries[1].output_lines[1000])
+    end)
+
+    it("should pass through output_lines under the limit", function()
+      local small_output = {}
+      for i = 1, 50 do
+        small_output[i] = "line " .. i
+      end
+
+      local max_output_lines = 1000
+      local output_lines
+      if #small_output > max_output_lines then
+        output_lines = { unpack(small_output, #small_output - max_output_lines + 1) }
+      else
+        output_lines = small_output
+      end
+
+      history.add_entry({
+        script_name = "small_script",
+        exit_code = 1,
+        execution_time = 0.5,
+        timestamp = os.time(),
+        output_lines = output_lines,
+      })
+
+      local entries = history.get_entries()
+      assert.are.equal(1, #entries)
+      assert.are.equal(50, #entries[1].output_lines)
+      assert.are.equal("line 1", entries[1].output_lines[1])
+      assert.are.equal("line 50", entries[1].output_lines[50])
+    end)
+
+    it("should preserve stacktrace at end of truncated output", function()
+      local output = {}
+      for i = 1, 1500 do
+        output[i] = "build output line " .. i
+      end
+      -- Add stacktrace lines at the end (these should be preserved)
+      output[1501] = "Traceback (most recent call last):"
+      output[1502] = '  File "/project/test.py", line 42, in test_func'
+      output[1503] = "    assert False"
+      output[1504] = "AssertionError"
+
+      local max_output_lines = 1000
+      local output_lines
+      if #output > max_output_lines then
+        output_lines = { unpack(output, #output - max_output_lines + 1) }
+      else
+        output_lines = output
+      end
+
+      history.add_entry({
+        script_name = "failing_test",
+        exit_code = 1,
+        execution_time = 2.0,
+        timestamp = os.time(),
+        output_lines = output_lines,
+      })
+
+      local entries = history.get_entries()
+      assert.are.equal(1000, #entries[1].output_lines)
+      -- Stacktrace should be at the end
+      assert.are.equal("AssertionError", entries[1].output_lines[1000])
+      assert.are.equal("    assert False", entries[1].output_lines[999])
+      assert.are.equal('  File "/project/test.py", line 42, in test_func', entries[1].output_lines[998])
+      assert.are.equal("Traceback (most recent call last):", entries[1].output_lines[997])
+    end)
+
+    it("should handle custom max_output_lines value", function()
+      local output = {}
+      for i = 1, 100 do
+        output[i] = "line " .. i
+      end
+
+      -- Use a custom smaller limit
+      local max_output_lines = 20
+      local output_lines
+      if #output > max_output_lines then
+        output_lines = { unpack(output, #output - max_output_lines + 1) }
+      else
+        output_lines = output
+      end
+
+      history.add_entry({
+        script_name = "custom_limit_test",
+        exit_code = 1,
+        execution_time = 0.5,
+        timestamp = os.time(),
+        output_lines = output_lines,
+      })
+
+      local entries = history.get_entries()
+      assert.are.equal(1, #entries)
+      assert.are.equal(20, #entries[1].output_lines)
+      -- Should contain lines 81-100
+      assert.are.equal("line 81", entries[1].output_lines[1])
+      assert.are.equal("line 100", entries[1].output_lines[20])
+    end)
+  end)
+
   describe("integration with execution flow", function()
     it("should maintain history order across multiple operations", function()
       -- Simulate multiple script executions
@@ -956,6 +1087,19 @@ describe("termlet history integration", function()
         scripts = {},
       })
       -- Should not error and use defaults
+      assert.is_not_nil(termlet)
+    end)
+
+    it("should accept max_output_lines in history config", function()
+      termlet.setup({
+        scripts = {},
+        history = {
+          enabled = true,
+          max_entries = 50,
+          max_output_lines = 500,
+        },
+      })
+      -- Should not error
       assert.is_not_nil(termlet)
     end)
   end)

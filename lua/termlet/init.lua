@@ -99,6 +99,7 @@ local config = {
   history = {
     enabled = true, -- Enable execution history tracking
     max_entries = 50, -- Maximum number of history entries to keep
+    max_output_lines = 1000, -- Maximum lines of output to keep per failed entry (tail)
   },
   debug = false,
 }
@@ -658,9 +659,16 @@ local function execute_script(script)
           local execution_time = (end_time - start_time) / 1e9 -- Convert to seconds
 
           -- Capture terminal buffer output for stacktrace viewing
+          -- Cap to max_output_lines (tail) to prevent unbounded memory growth
           local output_lines = nil
           if code ~= 0 and buf and vim.api.nvim_buf_is_valid(buf) then
-            output_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+            local all_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+            local max_output_lines = config.history.max_output_lines or 1000
+            if #all_lines > max_output_lines then
+              output_lines = { unpack(all_lines, #all_lines - max_output_lines + 1) }
+            else
+              output_lines = all_lines
+            end
           end
 
           history.add_entry({
