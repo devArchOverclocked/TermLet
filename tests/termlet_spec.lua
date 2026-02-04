@@ -500,6 +500,87 @@ describe("termlet", function()
     end)
   end)
 
+  describe("format_terminal_title watch integration", function()
+    local watch
+
+    before_each(function()
+      watch = require("termlet.watch")
+      watch._reset()
+    end)
+
+    after_each(function()
+      watch._reset()
+    end)
+
+    it("should append [watch] indicator when script is being watched", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+
+      -- Start watching a script so get_title_indicator returns " [watch]"
+      local watch_config = { patterns = {}, exclude = {}, debounce = 100 }
+      watch.start("build", { name = "build" }, watch_config, tmp, function() end)
+
+      local cfg = {
+        title_format = " {icon} {name} ",
+        title_icon = "",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "build", nil)
+      assert.is_truthy(result:find("[watch]", 1, true))
+
+      -- Cleanup
+      watch.stop("build")
+      vim.fn.delete(tmp, "rf")
+    end)
+
+    it("should not include [watch] when script is not being watched", function()
+      local cfg = {
+        title_format = " {icon} {name} ",
+        title_icon = "",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "build", nil)
+      assert.is_falsy(result:find("[watch]", 1, true))
+    end)
+
+    it("should replace {watch} placeholder when present in title_format", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+
+      local watch_config = { patterns = {}, exclude = {}, debounce = 100 }
+      watch.start("test", { name = "test" }, watch_config, tmp, function() end)
+
+      local cfg = {
+        title_format = " {name} {watch} ",
+        title_icon = "",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "test", nil)
+      assert.is_truthy(result:find("[watch]", 1, true))
+      -- Should not double-append since {watch} placeholder is in the format
+      local _, count = result:gsub("%[watch%]", "")
+      assert.are.equal(1, count)
+
+      -- Cleanup
+      watch.stop("test")
+      vim.fn.delete(tmp, "rf")
+    end)
+
+    it("should have empty {watch} when not watching and placeholder is in format", function()
+      local cfg = {
+        title_format = " {name} {watch} ",
+        title_icon = "",
+        show_status = false,
+        status_icons = {},
+      }
+      local result = termlet._format_terminal_title(cfg, "build", nil)
+      assert.is_falsy(result:find("[watch]", 1, true))
+    end)
+  end)
+
   describe("create_floating_terminal styling", function()
     it("should create terminal with default styling", function()
       termlet.setup({ scripts = {} })
