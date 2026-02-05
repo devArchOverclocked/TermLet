@@ -541,6 +541,13 @@ describe("termlet.sharing", function()
       assert.is_not_nil(err)
     end)
 
+    it("should sandbox Lua imports against debug library", function()
+      local malicious = "local e = debug.getfenv(0) return { scripts = {} }"
+      local data, err = sharing.parse_config(malicious, "lua")
+      assert.is_nil(data)
+      assert.is_not_nil(err)
+    end)
+
     it("should reject Lua bytecode", function()
       -- Lua bytecode starts with \27Lua
       local bytecode = "\27Lua" .. string.rep("\0", 20)

@@ -1608,7 +1608,6 @@ function M.import_config(filepath, opts)
     return true, preview_text
   end
 
-  -- Show preview and confirm via vim.ui.select
   local total_changes = #preview.added + #preview.updated + #preview.removed
   if total_changes == 0 then
     vim.notify("No changes to apply from import.", vim.log.levels.INFO)
