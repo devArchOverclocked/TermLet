@@ -19,6 +19,12 @@ return {
         {
           name = "test",
           filename = "test",
+          -- Watch mode: auto-rerun when source files change
+          watch = {
+            patterns = { "*.lua", "*.py" }, -- glob patterns to monitor
+            exclude = { "node_modules", ".git" }, -- directories to skip
+            debounce = 500, -- ms delay before re-running
+          },
         },
         -- Absolute path: runs a script outside of root_dir
         {
@@ -123,6 +129,21 @@ return {
           require("termlet").toggle_filters()
         end,
         desc = "TermLet: Toggle filters",
+      },
+      -- Watch mode: auto-rerun scripts on file changes
+      {
+        "<leader>tw",
+        function()
+          require("termlet").toggle_watch("test")
+        end,
+        desc = "TermLet: Toggle watch mode for test",
+      },
+      {
+        "<leader>tW",
+        function()
+          require("termlet").stop_all_watches()
+        end,
+        desc = "TermLet: Stop all watchers",
       },
     },
   },
