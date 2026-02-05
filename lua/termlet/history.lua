@@ -11,6 +11,10 @@ local state = {
   win = nil,
   config = nil,
   rerun_callback = nil,
+  buf_leave_autocmd = nil, -- Autocmd ID for BufLeave on history buffer
+  stacktrace_buf = nil, -- Buffer for stacktrace display
+  stacktrace_win = nil, -- Window for stacktrace display
+  stacktrace_entry = nil, -- Entry currently shown in stacktrace view
 }
 
 -- Default history UI configuration
@@ -68,6 +72,17 @@ function M.get_last_entry()
   return nil
 end
 
+--- Get the most recent failed history entry (with output_lines)
+---@return table|nil Most recent failed entry or nil if none
+function M.get_last_failed_entry()
+  for _, entry in ipairs(state.entries) do
+    if entry.exit_code and entry.exit_code ~= 0 and entry.output_lines and #entry.output_lines > 0 then
+      return entry
+    end
+  end
+  return nil
+end
+
 --- Clear all history entries
 function M.clear_history()
   state.entries = {}
@@ -110,7 +125,7 @@ local function calculate_window_opts(config)
     border = config.border,
     title = config.title,
     title_pos = "center",
-    footer = " [Enter] Re-run  [c] Clear  [q] Close ",
+    footer = " [Enter] Re-run  [s] Stacktrace  [c] Clear  [q] Close ",
     footer_pos = "center",
   }
 end
@@ -322,8 +337,184 @@ local function clear_history_ui()
   vim.notify("History cleared", vim.log.levels.INFO)
 end
 
+--- Close the stacktrace view if open
+function M.close_stacktrace()
+  if state.stacktrace_win and vim.api.nvim_win_is_valid(state.stacktrace_win) then
+    vim.api.nvim_win_close(state.stacktrace_win, true)
+  end
+  state.stacktrace_win = nil
+  state.stacktrace_buf = nil
+  state.stacktrace_entry = nil
+end
+
+--- Check if stacktrace view is currently open
+---@return boolean
+function M.is_stacktrace_open()
+  return state.stacktrace_win ~= nil and vim.api.nvim_win_is_valid(state.stacktrace_win)
+end
+
+--- Show stacktrace for a given history entry in a floating window
+---@param entry table History entry with output_lines field
+---@param ui_config table|nil Optional UI configuration
+---@return boolean Success
+function M.show_stacktrace(entry, ui_config)
+  if not entry then
+    vim.notify("No entry provided", vim.log.levels.INFO)
+    return false
+  end
+
+  if not entry.output_lines or #entry.output_lines == 0 then
+    vim.notify("No output captured for '" .. (entry.script_name or "unknown") .. "'", vim.log.levels.INFO)
+    return false
+  end
+
+  if entry.exit_code == 0 then
+    vim.notify("'" .. (entry.script_name or "unknown") .. "' succeeded (exit code 0)", vim.log.levels.INFO)
+    return false
+  end
+
+  -- Close existing stacktrace window if open
+  M.close_stacktrace()
+
+  local cfg = vim.tbl_deep_extend("force", default_config, ui_config or {})
+
+  -- Create buffer
+  state.stacktrace_buf = vim.api.nvim_create_buf(false, true)
+  if not state.stacktrace_buf then
+    vim.notify("Failed to create stacktrace buffer", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Set buffer options
+  vim.bo[state.stacktrace_buf].bufhidden = "wipe"
+  vim.bo[state.stacktrace_buf].filetype = "termlet_stacktrace"
+  vim.bo[state.stacktrace_buf].buflisted = false
+
+  -- Build display lines
+  local lines = {}
+  local exit_str = string.format("exit code %d", entry.exit_code or -1)
+  table.insert(lines, "")
+  table.insert(lines, "  Stacktrace: " .. (entry.script_name or "unknown") .. " (" .. exit_str .. ")")
+  table.insert(lines, "  " .. string.rep("─", 60))
+  table.insert(lines, "")
+
+  for _, line in ipairs(entry.output_lines) do
+    table.insert(lines, "  " .. line)
+  end
+
+  -- Set buffer content
+  vim.api.nvim_buf_set_lines(state.stacktrace_buf, 0, -1, false, lines)
+  vim.bo[state.stacktrace_buf].modifiable = false
+
+  -- Calculate window dimensions
+  local width = math.floor(vim.o.columns * cfg.width_ratio)
+  local height = math.floor(vim.o.lines * cfg.height_ratio)
+  width = math.max(width, 60)
+  height = math.max(height, 15)
+
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  local win_opts = {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    anchor = "NW",
+    style = "minimal",
+    border = cfg.border,
+    title = " Stacktrace: " .. (entry.script_name or "unknown") .. " ",
+    title_pos = "center",
+    footer = " [q] Close ",
+    footer_pos = "center",
+  }
+
+  state.stacktrace_win = vim.api.nvim_open_win(state.stacktrace_buf, true, win_opts)
+  if not state.stacktrace_win then
+    vim.api.nvim_buf_delete(state.stacktrace_buf, { force = true })
+    vim.notify("Failed to create stacktrace window", vim.log.levels.ERROR)
+    return false
+  end
+
+  state.stacktrace_entry = entry
+
+  -- Set window options
+  vim.wo[state.stacktrace_win].cursorline = false
+  vim.wo[state.stacktrace_win].wrap = true
+  vim.wo[state.stacktrace_win].number = false
+  vim.wo[state.stacktrace_win].relativenumber = false
+  vim.wo[state.stacktrace_win].signcolumn = "no"
+
+  -- Set up keymaps for the stacktrace buffer
+  local buf_opts = { noremap = true, silent = true, buffer = state.stacktrace_buf }
+  vim.keymap.set("n", "q", M.close_stacktrace, buf_opts)
+  vim.keymap.set("n", "<Esc>", M.close_stacktrace, buf_opts)
+
+  -- Auto-close on buffer leave and return to history if it's still open
+  vim.api.nvim_create_autocmd("BufLeave", {
+    buffer = state.stacktrace_buf,
+    callback = function()
+      vim.schedule(function()
+        M.close_stacktrace()
+        -- Return focus to history window if it's still open
+        if state.win and vim.api.nvim_win_is_valid(state.win) then
+          vim.api.nvim_set_current_win(state.win)
+        end
+      end)
+    end,
+    once = true,
+  })
+
+  return true
+end
+
+--- Toggle the stacktrace view for a given entry
+---@param entry table History entry
+---@param ui_config table|nil Optional UI configuration
+---@return boolean New open state
+function M.toggle_stacktrace(entry, ui_config)
+  if M.is_stacktrace_open() then
+    M.close_stacktrace()
+    return false
+  else
+    return M.show_stacktrace(entry, ui_config)
+  end
+end
+
+--- Show stacktrace for the selected entry in the history UI
+local function show_selected_stacktrace()
+  if #state.entries == 0 then
+    return
+  end
+
+  local selected_entry = state.entries[state.selected_index or 1]
+  if not selected_entry then
+    return
+  end
+
+  if selected_entry.exit_code == 0 then
+    vim.notify("'" .. (selected_entry.script_name or "unknown") .. "' succeeded (no stacktrace)", vim.log.levels.INFO)
+    return
+  end
+
+  if not selected_entry.output_lines or #selected_entry.output_lines == 0 then
+    vim.notify("No output captured for '" .. (selected_entry.script_name or "unknown") .. "'", vim.log.levels.INFO)
+    return
+  end
+
+  -- Capture config before any potential state changes
+  local cfg = state.config
+  M.show_stacktrace(selected_entry, cfg)
+end
+
 --- Close the history UI
 function M.close()
+  M.close_stacktrace() -- Close stacktrace overlay first to prevent orphaned windows
+  if state.buf_leave_autocmd then
+    pcall(vim.api.nvim_del_autocmd, state.buf_leave_autocmd)
+    state.buf_leave_autocmd = nil
+  end
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
   end
@@ -348,6 +539,7 @@ local function setup_keymaps()
   -- Actions
   vim.keymap.set("n", "<CR>", rerun_selected, opts)
   vim.keymap.set("n", "<Enter>", rerun_selected, opts)
+  vim.keymap.set("n", "s", show_selected_stacktrace, opts)
   vim.keymap.set("n", "c", clear_history_ui, opts)
   vim.keymap.set("n", "q", M.close, opts)
   vim.keymap.set("n", "<Esc>", M.close, opts)
@@ -404,13 +596,18 @@ function M.open(rerun_callback, ui_config)
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn = "no"
 
-  -- Auto-close on buffer leave
-  vim.api.nvim_create_autocmd("BufLeave", {
+  -- Auto-close on buffer leave, but not when switching to the stacktrace window
+  state.buf_leave_autocmd = vim.api.nvim_create_autocmd("BufLeave", {
     buffer = state.buf,
     callback = function()
-      M.close()
+      vim.schedule(function()
+        -- Don't close history if we switched to the stacktrace buffer
+        if M.is_stacktrace_open() then
+          return
+        end
+        M.close()
+      end)
     end,
-    once = true,
   })
 
   -- Set up keymaps
