@@ -103,6 +103,12 @@ Here's the full configuration structure:
     border = "rounded", -- Menu border style
     title = " TermLet Scripts " -- Menu window title
   },
+  keybindings = {
+    width_ratio = 0.6,  -- Keybindings window width (fraction of screen)
+    height_ratio = 0.5, -- Keybindings window height (fraction of screen)
+    border = "rounded", -- Keybindings border style
+    title = " TermLet Keybindings " -- Keybindings window title
+  },
   search = {
     exclude_dirs = {},   -- Directories to exclude from search (defaults include node_modules, .git, etc.)
     exclude_hidden = true, -- Exclude hidden directories (starting with .)
@@ -410,6 +416,9 @@ print(bindings["build"]) -- "<leader>b"
 require("termlet").open_keybindings()
 require("termlet").close_keybindings()
 require("termlet").toggle_keybindings()
+
+-- Check if keybindings UI is open
+local is_open = require("termlet").is_keybindings_open()
 ```
 
 ---
