@@ -1402,6 +1402,21 @@ describe("termlet sharing integration", function()
       local scripts = termlet.get_scripts()
       assert.are.equal(2, #scripts)
     end)
+
+    it("should return a deep copy that does not mutate internal state", function()
+      termlet.setup({
+        scripts = {
+          { name = "build", filename = "build.sh" },
+        },
+      })
+      local scripts = termlet.get_scripts()
+      scripts[1].name = "mutated"
+      table.insert(scripts, { name = "injected", filename = "evil.sh" })
+      -- Internal state should be unchanged
+      local scripts2 = termlet.get_scripts()
+      assert.are.equal(1, #scripts2)
+      assert.are.equal("build", scripts2[1].name)
+    end)
   end)
 
   describe("TermLetExport command", function()

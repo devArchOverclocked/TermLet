@@ -1662,9 +1662,9 @@ function M.preview_import(filepath, opts)
 end
 
 --- Get the current scripts configuration (for programmatic export)
----@return table Current scripts list
+---@return table Copy of current scripts list
 function M.get_scripts()
-  return config.scripts or {}
+  return vim.deepcopy(config.scripts or {})
 end
 
 return M
