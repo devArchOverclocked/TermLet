@@ -95,24 +95,41 @@ local function matches_patterns(filepath, patterns)
   return false
 end
 
+--- Build a lookup set from an exclude list for O(1) component checks.
+---@param exclude table List of directory names to exclude
+---@return table Set where keys are excluded names
+local function build_exclude_set(exclude)
+  local set = {}
+  if exclude then
+    for _, excluded in ipairs(exclude) do
+      set[excluded] = true
+    end
+  end
+  return set
+end
+
 --- Check if a path should be excluded from watching.
 --- Compares each path component exactly against the exclude list,
 --- so "build" excludes "build/" but not "rebuild/" or "build-tools/".
 ---@param path string Path or path component to check
----@param exclude table List of directory names to exclude
+---@param exclude_set table Pre-built set from build_exclude_set(), or list of names
 ---@return boolean
-local function is_excluded(path, exclude)
-  if not exclude or #exclude == 0 then
+local function is_excluded(path, exclude_set)
+  if not exclude_set then
     return false
   end
-  -- Build a lookup set for O(1) checks
-  local exclude_set = {}
-  for _, excluded in ipairs(exclude) do
-    exclude_set[excluded] = true
+  -- Support both pre-built sets and plain lists for backward compatibility
+  -- A pre-built set has string keys; a list has integer keys
+  local set = exclude_set
+  if #exclude_set > 0 then
+    set = build_exclude_set(exclude_set)
+  end
+  if not next(set) then
+    return false
   end
   -- Split path on "/" and check each component
   for component in path:gmatch("[^/]+") do
-    if exclude_set[component] then
+    if set[component] then
       return true
     end
   end
@@ -210,6 +227,10 @@ function M.start(script_name, script, watch_config, root_dir)
     return false
   end
 
+  -- Pre-build the exclude set once so the fs_event callback doesn't
+  -- rebuild it on every file change event.
+  local exclude_set = build_exclude_set(cfg.exclude)
+
   local w = {
     watcher_handles = {},
     timer = nil,
@@ -217,6 +238,7 @@ function M.start(script_name, script, watch_config, root_dir)
     config = cfg,
     script = script,
     root_dir = expanded_root,
+    exclude_set = exclude_set,
   }
 
   -- Create debounce timer
@@ -253,7 +275,8 @@ function M.start(script_name, script, watch_config, root_dir)
         local basename = filename:match("[^/]+$") or filename
 
         -- Check exclusions on the full path (checks each component)
-        if is_excluded(rel_path, cfg.exclude) then
+        -- Uses pre-built exclude_set for O(1) lookups without per-event allocation
+        if is_excluded(rel_path, exclude_set) then
           return
         end
 
@@ -414,6 +437,7 @@ end
 M._glob_to_pattern = glob_to_pattern
 M._matches_patterns = matches_patterns
 M._is_excluded = is_excluded
+M._build_exclude_set = build_exclude_set
 M._collect_watch_dirs = collect_watch_dirs
 M._default_watch_config = default_watch_config
 
