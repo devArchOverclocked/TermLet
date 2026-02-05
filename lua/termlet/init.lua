@@ -633,6 +633,11 @@ local function execute_script(script)
 
   -- Collect output lines for storing in history (used for stacktrace display)
   local collected_output = {}
+  local max_output_lines = 1000
+  local strip = type(stacktrace.strip_ansi) == "function" and stacktrace.strip_ansi
+    or function(s)
+      return s:gsub("\27%[[?>=]*[%d;]*[A-Za-z@]", "")
+    end
 
   -- Run the command in the terminal.
   -- Note: termopen() creates a pseudo-terminal (PTY), which merges stdout and
@@ -692,11 +697,6 @@ local function execute_script(script)
       end
       -- Collect output for history stacktrace display (capped to prevent unbounded memory)
       if config.history.enabled and data then
-        local max_output_lines = 1000
-        local strip = type(stacktrace.strip_ansi) == "function" and stacktrace.strip_ansi
-          or function(s)
-            return s:gsub("\27%[[?>=]*[%d;]*[A-Za-z@]", "")
-          end
         for _, line in ipairs(data) do
           if line and line ~= "" then
             table.insert(collected_output, strip(line))

@@ -510,6 +510,7 @@ end
 
 --- Close the history UI
 function M.close()
+  M.close_stacktrace() -- Close stacktrace overlay first to prevent orphaned windows
   if state.buf_leave_autocmd then
     pcall(vim.api.nvim_del_autocmd, state.buf_leave_autocmd)
     state.buf_leave_autocmd = nil
